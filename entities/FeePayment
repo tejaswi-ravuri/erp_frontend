@@ -1,0 +1,61 @@
+{
+  "name": "FeePayment",
+  "type": "object",
+  "properties": {
+    "payment_id": {
+      "type": "string"
+    },
+    "student_id": {
+      "type": "string"
+    },
+    "student_name": {
+      "type": "string"
+    },
+    "academic_year": {
+      "type": "string"
+    },
+    "fee_type": {
+      "type": "string",
+      "enum": [
+        "Tuition",
+        "Annual",
+        "Transport",
+        "Exam",
+        "Other"
+      ]
+    },
+    "amount": {
+      "type": "number"
+    },
+    "payment_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "payment_mode": {
+      "type": "string",
+      "enum": [
+        "Cash",
+        "Online",
+        "Cheque"
+      ],
+      "default": "Cash"
+    },
+    "receipt_no": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "Paid",
+        "Pending"
+      ],
+      "default": "Pending"
+    }
+  },
+  "required": [
+    "student_id",
+    "fee_type",
+    "amount",
+    "academic_year"
+  ]
+}

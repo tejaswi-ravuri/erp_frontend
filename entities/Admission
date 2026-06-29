@@ -1,0 +1,300 @@
+{
+  "name": "Admission",
+  "type": "object",
+  "properties": {
+    "academic_year": {
+      "type": "string"
+    },
+    "unique_id": {
+      "type": "string"
+    },
+    "application_no": {
+      "type": "string"
+    },
+    "admission_no": {
+      "type": "string"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "Telangana",
+        "Andhra Pradesh",
+        "Maharashtra",
+        "Karnataka"
+      ]
+    },
+    "branch": {
+      "type": "string",
+      "enum": [
+        "Hyderabad",
+        "Secunderabad",
+        "Kukatpally",
+        "Miyapur"
+      ]
+    },
+    "form_status": {
+      "type": "string",
+      "enum": [
+        "Enquiry",
+        "Applied",
+        "Under Review",
+        "Admitted",
+        "Rejected"
+      ],
+      "default": "Enquiry"
+    },
+    "class_sought": {
+      "type": "string",
+      "enum": [
+        "LKG",
+        "UKG",
+        "Class 1",
+        "Class 2",
+        "Class 3",
+        "Class 4",
+        "Class 5",
+        "Class 6",
+        "Class 7",
+        "Class 8",
+        "Class 9",
+        "Class 10",
+        "Class 11",
+        "Class 12"
+      ]
+    },
+    "student_name": {
+      "type": "string"
+    },
+    "gender": {
+      "type": "string",
+      "enum": [
+        "Male",
+        "Female"
+      ]
+    },
+    "dob": {
+      "type": "string",
+      "format": "date"
+    },
+    "height_cm": {
+      "type": "number"
+    },
+    "weight_kg": {
+      "type": "number"
+    },
+    "nationality": {
+      "type": "string",
+      "default": "Indian"
+    },
+    "religion": {
+      "type": "string"
+    },
+    "mother_tongue": {
+      "type": "string"
+    },
+    "caste": {
+      "type": "string",
+      "enum": [
+        "SC",
+        "ST",
+        "BC",
+        "OC"
+      ]
+    },
+    "id_mark_1": {
+      "type": "string"
+    },
+    "id_mark_2": {
+      "type": "string"
+    },
+    "blood_group": {
+      "type": "string",
+      "enum": [
+        "A+",
+        "A-",
+        "B+",
+        "B-",
+        "O+",
+        "O-",
+        "AB+",
+        "AB-"
+      ]
+    },
+    "health_status": {
+      "type": "string"
+    },
+    "passport_photo": {
+      "type": "string"
+    },
+    "father_name": {
+      "type": "string"
+    },
+    "father_qualification": {
+      "type": "string"
+    },
+    "father_occupation": {
+      "type": "string"
+    },
+    "father_mobile": {
+      "type": "string"
+    },
+    "father_email": {
+      "type": "string"
+    },
+    "mother_name": {
+      "type": "string"
+    },
+    "mother_qualification": {
+      "type": "string"
+    },
+    "mother_occupation": {
+      "type": "string"
+    },
+    "mother_mobile": {
+      "type": "string"
+    },
+    "mother_email": {
+      "type": "string"
+    },
+    "family_income_pa": {
+      "type": "number"
+    },
+    "communication_address": {
+      "type": "string"
+    },
+    "permanent_address": {
+      "type": "string"
+    },
+    "same_as_communication": {
+      "type": "boolean",
+      "default": false
+    },
+    "prev_school_1_standard": {
+      "type": "string"
+    },
+    "prev_school_1_year": {
+      "type": "string"
+    },
+    "prev_school_1_name": {
+      "type": "string"
+    },
+    "prev_school_2_standard": {
+      "type": "string"
+    },
+    "prev_school_2_year": {
+      "type": "string"
+    },
+    "prev_school_2_name": {
+      "type": "string"
+    },
+    "prev_school_3_standard": {
+      "type": "string"
+    },
+    "prev_school_3_year": {
+      "type": "string"
+    },
+    "prev_school_3_name": {
+      "type": "string"
+    },
+    "doc_dob_cert": {
+      "type": "boolean",
+      "default": false
+    },
+    "doc_passport_photos": {
+      "type": "boolean",
+      "default": false
+    },
+    "doc_transfer_cert": {
+      "type": "boolean",
+      "default": false
+    },
+    "doc_id_proof": {
+      "type": "boolean",
+      "default": false
+    },
+    "doc_progress_record": {
+      "type": "boolean",
+      "default": false
+    },
+    "doc_caste_cert": {
+      "type": "boolean",
+      "default": false
+    },
+    "aadhaar_no": {
+      "type": "string"
+    },
+    "submit_aadhaar": {
+      "type": "boolean",
+      "default": false
+    },
+    "submit_ration_card": {
+      "type": "boolean",
+      "default": false
+    },
+    "submit_passport": {
+      "type": "boolean",
+      "default": false
+    },
+    "submit_other": {
+      "type": "boolean",
+      "default": false
+    },
+    "source_direct": {
+      "type": "boolean",
+      "default": false
+    },
+    "source_tele_call": {
+      "type": "boolean",
+      "default": false
+    },
+    "source_outdoor_ads": {
+      "type": "boolean",
+      "default": false
+    },
+    "staff_pro_name": {
+      "type": "string"
+    },
+    "fee_payable_amount": {
+      "type": "number"
+    },
+    "term1_due_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "term2_due_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "term3_due_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "declaration_accepted": {
+      "type": "boolean",
+      "default": false
+    },
+    "declaration_date": {
+      "type": "string"
+    },
+    "student_signature": {
+      "type": "string"
+    },
+    "parent_signature": {
+      "type": "string"
+    },
+    "principal_signature": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "academic_year",
+    "application_no",
+    "class_sought",
+    "student_name",
+    "gender",
+    "father_mobile",
+    "mother_mobile",
+    "communication_address",
+    "fee_payable_amount"
+  ]
+}

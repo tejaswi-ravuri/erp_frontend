@@ -1,0 +1,42 @@
+{
+  "name": "Attendance",
+  "type": "object",
+  "properties": {
+    "attendance_id": {
+      "type": "string"
+    },
+    "student_id": {
+      "type": "string"
+    },
+    "student_name": {
+      "type": "string"
+    },
+    "class": {
+      "type": "string"
+    },
+    "section": {
+      "type": "string"
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "Present",
+        "Absent",
+        "Late"
+      ],
+      "default": "Present"
+    },
+    "marked_by": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "student_id",
+    "date",
+    "status"
+  ]
+}

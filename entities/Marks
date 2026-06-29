@@ -1,0 +1,53 @@
+{
+  "name": "Marks",
+  "type": "object",
+  "properties": {
+    "marks_id": {
+      "type": "string"
+    },
+    "student_id": {
+      "type": "string"
+    },
+    "student_name": {
+      "type": "string"
+    },
+    "class": {
+      "type": "string"
+    },
+    "exam_type": {
+      "type": "string",
+      "enum": [
+        "Unit Test",
+        "Mid Term",
+        "Final"
+      ]
+    },
+    "subject": {
+      "type": "string",
+      "enum": [
+        "Maths",
+        "Science",
+        "English",
+        "Hindi",
+        "Social Studies",
+        "Computer"
+      ]
+    },
+    "marks_obtained": {
+      "type": "number"
+    },
+    "max_marks": {
+      "type": "number"
+    },
+    "grade": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "student_id",
+    "exam_type",
+    "subject",
+    "marks_obtained",
+    "max_marks"
+  ]
+}

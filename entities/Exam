@@ -1,0 +1,83 @@
+{
+  "name": "Exam",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "class": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "total_marks": {
+      "type": "number"
+    },
+    "passing_marks": {
+      "type": "number"
+    },
+    "exam_type": {
+      "type": "string",
+      "enum": [
+        "Unit Test",
+        "Mid Term",
+        "Annual",
+        "Other"
+      ]
+    }
+  },
+  "required": [
+    "name",
+    "class",
+    "subject",
+    "date"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "$or": [
+          {
+            "role": "admin"
+          },
+          {
+            "role": "user"
+          }
+        ]
+      }
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

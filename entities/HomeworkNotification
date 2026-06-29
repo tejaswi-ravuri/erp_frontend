@@ -1,0 +1,51 @@
+{
+  "name": "HomeworkNotification",
+  "type": "object",
+  "properties": {
+    "homework_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "class": {
+      "type": "string"
+    },
+    "section": {
+      "type": "string"
+    },
+    "due_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "assigned_by": {
+      "type": "string"
+    },
+    "student_id": {
+      "type": "string"
+    },
+    "student_name": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "Unread",
+        "Read"
+      ],
+      "default": "Unread"
+    }
+  },
+  "required": [
+    "title",
+    "subject",
+    "class",
+    "student_id"
+  ]
+}

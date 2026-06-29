@@ -1,0 +1,90 @@
+{
+  "name": "StudentFeeReport",
+  "type": "object",
+  "properties": {
+    "sno": {
+      "type": "number"
+    },
+    "student_id": {
+      "type": "string"
+    },
+    "student_name": {
+      "type": "string"
+    },
+    "father_name": {
+      "type": "string"
+    },
+    "mob_number": {
+      "type": "string"
+    },
+    "class": {
+      "type": "string"
+    },
+    "student_type": {
+      "type": "string",
+      "enum": [
+        "Existing",
+        "New"
+      ]
+    },
+    "old_fee": {
+      "type": "number"
+    },
+    "adm_gross_fee": {
+      "type": "number"
+    },
+    "adm_concession": {
+      "type": "number",
+      "default": 0
+    },
+    "net_adm_fee": {
+      "type": "number"
+    },
+    "paid_adm_fee": {
+      "type": "number"
+    },
+    "balance_adm_fee": {
+      "type": "number"
+    },
+    "gross_term_fee": {
+      "type": "number"
+    },
+    "term_concession": {
+      "type": "number",
+      "default": 0
+    },
+    "net_term_fee": {
+      "type": "number"
+    },
+    "paid_term_fee": {
+      "type": "number"
+    },
+    "balance_term_fee": {
+      "type": "number"
+    },
+    "remarks": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "Active",
+        "Inactive"
+      ],
+      "default": "Active"
+    }
+  },
+  "required": [
+    "student_id",
+    "student_name",
+    "father_name",
+    "mob_number",
+    "class",
+    "student_type",
+    "adm_gross_fee",
+    "paid_adm_fee",
+    "gross_term_fee",
+    "paid_term_fee"
+  ]
+}

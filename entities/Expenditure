@@ -1,0 +1,41 @@
+{
+  "name": "Expenditure",
+  "type": "object",
+  "properties": {
+    "exp_id": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "Salaries",
+        "Utilities",
+        "Maintenance",
+        "Supplies",
+        "Events",
+        "Misc"
+      ]
+    },
+    "description": {
+      "type": "string"
+    },
+    "amount": {
+      "type": "number"
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "paid_to": {
+      "type": "string"
+    },
+    "approved_by": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "category",
+    "amount",
+    "date"
+  ]
+}

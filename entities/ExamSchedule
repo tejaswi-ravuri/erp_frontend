@@ -1,0 +1,62 @@
+{
+  "name": "ExamSchedule",
+  "type": "object",
+  "properties": {
+    "exam_name": {
+      "type": "string"
+    },
+    "class": {
+      "type": "string"
+    },
+    "section": {
+      "type": "string"
+    },
+    "academic_year": {
+      "type": "string"
+    },
+    "exam_type": {
+      "type": "string",
+      "enum": [
+        "Unit Test",
+        "Mid Term",
+        "Final",
+        "Annual"
+      ]
+    },
+    "center": {
+      "type": "string"
+    },
+    "invigilator": {
+      "type": "string"
+    },
+    "subjects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "string"
+          },
+          "max_marks": {
+            "type": "number"
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "exam_name",
+    "class",
+    "exam_type",
+    "academic_year"
+  ]
+}
