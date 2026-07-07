@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { entities } from "@/api/entityClient";
-import { Plus, Search, Pencil, Trash2, Upload } from "lucide-react";
+import {
+  Plus,
+  Search,
+  Pencil,
+  Trash2,
+  Upload,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import StudentBulkUpload from "@/components/students/StudentBulkUpload";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +40,7 @@ const CLASSES = [
   "Class 11",
   "Class 12",
 ];
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const EMPTY = {
   admission_no: "",
   full_name: "",
@@ -59,6 +68,8 @@ export default function BPStudents() {
   const [form, setForm] = useState(EMPTY);
   const [loading, setLoading] = useState(true);
   const [showBulk, setShowBulk] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const load = () =>
     entities.Student.list("-created_date").then((d) => {
@@ -78,6 +89,24 @@ export default function BPStudents() {
     const matchClass = filterClass === "all" || s.class === filterClass;
     return matchSearch && matchClass;
   });
+
+  // Jump back to page 1 whenever the filtered set changes because of a
+  // new search term or class filter, so the user isn't left staring at
+  // an empty page.
+  useEffect(() => {
+    setPage(1);
+  }, [search, filterClass]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  // If rows disappear (e.g. after a delete) and the current page no
+  // longer exists, clamp back to the last valid page.
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [totalPages, page]);
+
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const rangeStart = filtered.length === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, filtered.length);
 
   const openNew = () => {
     setForm(EMPTY);
@@ -196,7 +225,7 @@ export default function BPStudents() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((s) => (
+                paginated.map((s) => (
                   <tr key={s.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 text-slate-500">
                       {s.admission_no || "-"}
@@ -245,6 +274,61 @@ export default function BPStudents() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Pagination bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-t border-slate-100">
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span>
+              {filtered.length === 0
+                ? "0 results"
+                : `Showing ${rangeStart}–${rangeEnd} of ${filtered.length}`}
+            </span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(v) => {
+                setPageSize(Number(v));
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-28 h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((n) => (
+                  <SelectItem key={n} value={String(n)}>
+                    {n} / page
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              Previous
+            </Button>
+            <span className="text-xs text-slate-500 px-1">
+              Page {page} of {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next
+              <ChevronRight className="w-3.5 h-3.5" />
+            </Button>
+          </div>
         </div>
       </div>
 

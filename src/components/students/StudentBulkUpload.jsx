@@ -8,57 +8,68 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Upload, Download, CheckCircle2, AlertCircle, X } from "lucide-react";
+import { Upload, Download, CheckCircle2, AlertCircle } from "lucide-react";
 
 const TEMPLATE_HEADERS = [
-  "admission_no",
-  "full_name",
-  "dob",
-  "gender",
-  "blood_group",
-  "class",
-  "section",
-  "roll_no",
-  "parent_name",
-  "parent_phone",
-  "parent_email",
-  "address",
-  "city",
-  "joining_date",
-  "status",
+  "Uniq-id",
+  "Student name",
+  "Class",
+  "Section",
+  "Roll.no",
+  "Admission ID",
+  "Father name",
+  "Father mobile number",
+  "Mother name",
+  "Mother mobile number",
+  "Year of joining",
+  "Adhar Number",
+  "Gender",
+  "Date of Birth",
+  "Caste",
+  "Communication Address",
+  "Permanent Address",
 ];
 
-const SAMPLE_ROW = [
-  "ADM001",
-  "Rahul Kumar",
-  "2010-05-15",
-  "Male",
-  "O+",
-  "Class 8",
-  "A",
-  "1",
-  "Suresh Kumar",
-  "9876543210",
-  "suresh@email.com",
-  "123 Main Street",
-  "Hyderabad",
-  "2024-06-01",
-  "Active",
-];
+const REQUIRED_FIELDS = ["Student name", "Class"];
+
+// Maps sheet column headers to the actual Student schema field names.
+// Columns not listed here (Uniq-id, Mother name, Mother mobile number,
+// Adhar Number, Caste, Permanent Address, Year of joining) have no home
+// in the current schema and are dropped rather than silently mis-saved.
+const HEADER_FIELD_MAP = {
+  "Student name": "full_name",
+  Class: "class",
+  Section: "section",
+  "Roll.no": "roll_no",
+  "Admission ID": "admission_no",
+  "Father name": "parent_name",
+  "Father mobile number": "parent_phone",
+  Gender: "gender",
+  "Date of Birth": "dob",
+  "Communication Address": "address",
+};
 
 export default function StudentBulkUpload({ open, onClose, onUploaded }) {
-  const [rows, setRows] = useState([]);
+  const [fileName, setFileName] = useState("");
+  const [validRows, setValidRows] = useState([]);
+  const [validCount, setValidCount] = useState(0);
+  const [invalidCount, setInvalidCount] = useState(0);
   const [errors, setErrors] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [done, setDone] = useState(false);
   const [successCount, setSuccessCount] = useState(0);
+  const [uploadErrors, setUploadErrors] = useState([]);
   const fileRef = useRef();
 
   const reset = () => {
-    setRows([]);
+    setFileName("");
+    setValidRows([]);
+    setValidCount(0);
+    setInvalidCount(0);
     setErrors([]);
     setDone(false);
     setSuccessCount(0);
+    setUploadErrors([]);
   };
 
   const handleClose = () => {
@@ -67,16 +78,17 @@ export default function StudentBulkUpload({ open, onClose, onUploaded }) {
   };
 
   const downloadTemplate = () => {
-    const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, SAMPLE_ROW]);
-    ws["!cols"] = TEMPLATE_HEADERS.map(() => ({ wch: 18 }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Students");
-    XLSX.writeFile(wb, "student-upload-template.xlsx");
+    const link = document.createElement("a");
+    link.href = "/student_bulkUpload_template.xlsx";
+    link.download = "student_bulkUpload_template.xlsx";
+    link.click();
   };
 
   const handleFile = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    setFileName(file.name);
+
     const reader = new FileReader();
     reader.onload = (evt) => {
       const wb = XLSX.read(evt.target.result, {
@@ -85,24 +97,40 @@ export default function StudentBulkUpload({ open, onClose, onUploaded }) {
       });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const data = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
       const errs = [];
-      const parsed = data.map((row, i) => {
-        const r = {};
+      const valid = [];
+
+      data.forEach((row, i) => {
+        const raw = {};
         TEMPLATE_HEADERS.forEach((h) => {
-          r[h] = String(row[h] || "").trim();
+          let val = row[h];
+          // Normalize date fields before stringifying, so real Date
+          // objects (from cellDates: true) don't get turned into a
+          // JS Date.toString() blob first.
+          if (val instanceof Date) val = val.toISOString().split("T")[0];
+          raw[h] = String(val ?? "").trim();
         });
-        if (!r.full_name) errs.push(`Row ${i + 2}: full_name is required`);
-        if (!r.class) errs.push(`Row ${i + 2}: class is required`);
-        // Normalize date fields
-        ["dob", "joining_date"].forEach((f) => {
-          if (r[f] && r[f] instanceof Date)
-            r[f] = r[f].toISOString().split("T")[0];
+
+        const missing = REQUIRED_FIELDS.filter((f) => !raw[f]);
+        if (missing.length > 0) {
+          errs.push(`Row ${i + 2}: missing ${missing.join(", ")}`);
+          return;
+        }
+
+        // Translate sheet headers into the field names the Student
+        // schema actually expects before this row is sent to the API.
+        const mapped = {};
+        Object.entries(HEADER_FIELD_MAP).forEach(([header, field]) => {
+          if (raw[header]) mapped[field] = raw[header];
         });
-        if (!r.status) r.status = "Active";
-        return r;
+        valid.push(mapped);
       });
+
       setErrors(errs);
-      setRows(parsed);
+      setValidRows(valid);
+      setValidCount(valid.length);
+      setInvalidCount(errs.length);
     };
     reader.readAsBinaryString(file);
     e.target.value = "";
@@ -111,15 +139,29 @@ export default function StudentBulkUpload({ open, onClose, onUploaded }) {
   const handleUpload = async () => {
     setUploading(true);
     let count = 0;
-    for (const row of rows) {
-      await entities.Student.create(row);
-      count++;
+    const failMsgs = [];
+    for (const row of validRows) {
+      try {
+        await entities.Student.create(row);
+        count++;
+      } catch (err) {
+        const msg =
+          err?.response?.data?.message ||
+          err?.response?.data?.error ||
+          err?.message ||
+          "Unknown error";
+        console.error("Failed to create student row:", row, err);
+        if (failMsgs.length < 5) failMsgs.push(msg);
+      }
     }
     setSuccessCount(count);
+    setUploadErrors(failMsgs);
     setUploading(false);
     setDone(true);
     onUploaded();
   };
+
+  const hasFile = validCount > 0 || invalidCount > 0;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -134,6 +176,23 @@ export default function StudentBulkUpload({ open, onClose, onUploaded }) {
             <p className="text-lg font-semibold text-slate-800">
               {successCount} students uploaded successfully!
             </p>
+            {successCount < validRows.length && (
+              <p className="text-sm text-slate-500">
+                {validRows.length - successCount} row(s) failed during upload.
+              </p>
+            )}
+            {uploadErrors.length > 0 && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 max-w-md text-left w-full">
+                <p className="text-xs font-medium text-red-600 mb-1">
+                  Sample error(s):
+                </p>
+                {uploadErrors.map((m, i) => (
+                  <p key={i} className="text-xs text-red-500 break-words">
+                    {m}
+                  </p>
+                ))}
+              </div>
+            )}
             <Button
               onClick={handleClose}
               className="bg-indigo-600 hover:bg-indigo-700 mt-2"
@@ -185,86 +244,40 @@ export default function StudentBulkUpload({ open, onClose, onUploaded }) {
               >
                 <Upload className="w-4 h-4" /> Choose File
               </Button>
+              {fileName && (
+                <p className="text-xs text-slate-500 mt-2">
+                  Selected: {fileName}
+                </p>
+              )}
             </div>
 
-            {/* Preview */}
-            {rows.length > 0 && (
-              <div>
-                {errors.length > 0 && (
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3">
-                    <div className="flex items-center gap-2 text-red-600 font-medium text-sm mb-1">
-                      <AlertCircle className="w-4 h-4" /> {errors.length}{" "}
-                      validation error(s)
-                    </div>
-                    {errors.map((e, i) => (
-                      <p key={i} className="text-xs text-red-500">
-                        {e}
-                      </p>
-                    ))}
-                  </div>
-                )}
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-3">
+            {/* Validation summary (no row-by-row table) */}
+            {hasFile && (
+              <div className="space-y-2">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
                   <p className="text-sm font-medium text-green-700">
-                    {rows.length} rows detected and ready to import
+                    {validCount} valid row{validCount !== 1 ? "s" : ""} ready to
+                    import
                   </p>
                 </div>
-                <div className="overflow-x-auto max-h-48 border border-slate-200 rounded-lg">
-                  <table className="w-full text-xs">
-                    <thead className="bg-slate-100 sticky top-0">
-                      <tr>
-                        {[
-                          "Name",
-                          "Class",
-                          "Section",
-                          "Gender",
-                          "Parent",
-                          "Phone",
-                          "Status",
-                        ].map((h) => (
-                          <th
-                            key={h}
-                            className="px-3 py-2 text-left text-slate-600 font-semibold whitespace-nowrap"
-                          >
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {rows.map((r, i) => (
-                        <tr key={i} className="hover:bg-slate-50">
-                          <td className="px-3 py-1.5 font-medium text-slate-800 whitespace-nowrap">
-                            {r.full_name || (
-                              <span className="text-red-500">—</span>
-                            )}
-                          </td>
-                          <td className="px-3 py-1.5 text-slate-600">
-                            {r.class || <span className="text-red-500">—</span>}
-                          </td>
-                          <td className="px-3 py-1.5 text-slate-600">
-                            {r.section || "—"}
-                          </td>
-                          <td className="px-3 py-1.5 text-slate-600">
-                            {r.gender || "—"}
-                          </td>
-                          <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">
-                            {r.parent_name || "—"}
-                          </td>
-                          <td className="px-3 py-1.5 text-slate-600">
-                            {r.parent_phone || "—"}
-                          </td>
-                          <td className="px-3 py-1.5">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-xs font-medium ${r.status === "Active" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}
-                            >
-                              {r.status || "Active"}
-                            </span>
-                          </td>
-                        </tr>
+
+                {invalidCount > 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                    <div className="flex items-center gap-2 text-red-600 font-medium text-sm mb-1">
+                      <AlertCircle className="w-4 h-4" />
+                      {invalidCount} row{invalidCount !== 1 ? "s" : ""} will be
+                      skipped
+                    </div>
+                    <div className="max-h-32 overflow-y-auto space-y-0.5 pl-1">
+                      {errors.map((e, i) => (
+                        <p key={i} className="text-xs text-red-500">
+                          {e}
+                        </p>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -274,12 +287,12 @@ export default function StudentBulkUpload({ open, onClose, onUploaded }) {
               </Button>
               <Button
                 onClick={handleUpload}
-                disabled={rows.length === 0 || errors.length > 0 || uploading}
+                disabled={validCount === 0 || uploading}
                 className="bg-indigo-600 hover:bg-indigo-700 gap-2"
               >
                 {uploading
                   ? "Uploading..."
-                  : `Upload ${rows.length > 0 ? rows.length + " Students" : ""}`}
+                  : `Upload ${validCount > 0 ? validCount + " Students" : ""}`}
               </Button>
             </div>
           </div>

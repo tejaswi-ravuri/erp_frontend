@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { entities } from "@/api/entityClient";
-import { Plus, User, X } from "lucide-react";
+import { Plus, User, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -17,6 +17,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import StatusBadge from "@/components/bp/StatusBadge";
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 const EMPTY = {
   staff_id: "",
@@ -38,6 +40,8 @@ export default function BPStaff() {
   const [form, setForm] = useState(EMPTY);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const load = async () => {
     setLoading(true);
@@ -50,6 +54,17 @@ export default function BPStaff() {
     load();
   }, []);
 
+  const totalPages = Math.max(1, Math.ceil(staff.length / pageSize));
+  // If staff shrinks (e.g. after a future delete) and the current page
+  // no longer exists, clamp back to the last valid page.
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [totalPages, page]);
+
+  const paginated = staff.slice((page - 1) * pageSize, page * pageSize);
+  const rangeStart = staff.length === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, staff.length);
+
   const save = async () => {
     await entities.Staff.create({
       ...form,
@@ -57,6 +72,7 @@ export default function BPStaff() {
     });
     setShowForm(false);
     setForm(EMPTY);
+    setPage(1);
     load();
   };
 
@@ -109,8 +125,18 @@ export default function BPStaff() {
                   </td>
                 </tr>
               )}
+              {!loading && staff.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="px-4 py-8 text-center text-slate-400"
+                  >
+                    No staff found
+                  </td>
+                </tr>
+              )}
               {!loading &&
-                staff.map((s) => (
+                paginated.map((s) => (
                   <tr
                     key={s.id}
                     className="hover:bg-slate-50 cursor-pointer"
@@ -146,6 +172,61 @@ export default function BPStaff() {
                 ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Pagination bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-t border-slate-100">
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span>
+              {staff.length === 0
+                ? "0 results"
+                : `Showing ${rangeStart}–${rangeEnd} of ${staff.length}`}
+            </span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(v) => {
+                setPageSize(Number(v));
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-28 h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((n) => (
+                  <SelectItem key={n} value={String(n)}>
+                    {n} / page
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              Previous
+            </Button>
+            <span className="text-xs text-slate-500 px-1">
+              Page {page} of {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next
+              <ChevronRight className="w-3.5 h-3.5" />
+            </Button>
+          </div>
         </div>
       </div>
 
