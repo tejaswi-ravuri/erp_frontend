@@ -26,10 +26,10 @@ function createEntityAPI(entityName) {
     /**
      * List records.
      * @param {string} [sort="-created_date"] - Sort field, prefix - for desc
-     * @param {number} [limit=200] - Max records to return
+     * @param {number} [limit=1000] - Max records to return
      * @param {object} [extraParams={}] - Additional query filters
      */
-    async list(sort = "-created_date", limit = 200, extraParams = {}) {
+    async list(sort = "-created_date", limit = 1000, extraParams = {}) {
       const { data } = await http.get(base, {
         params: { sort, limit, ...extraParams },
       });
