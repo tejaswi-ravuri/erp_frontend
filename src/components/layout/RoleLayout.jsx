@@ -74,6 +74,48 @@ const NAV_BY_ROLE = {
   ],
 };
 
+// Sub-navigation items for each role under specific labels
+const SUB_NAV_BY_ROLE = {
+  consultant: [
+    {
+      label: "Enquiry",
+      icon: Users,
+      path: "/admissions/enquiry",
+      parentNav: "Admissions",
+    },
+    {
+      label: "Sale of Application",
+      icon: ClipboardCheck,
+      path: "/admissions/applications",
+      parentNav: "Admissions",
+    },
+    {
+      label: "Admission Form",
+      icon: FileText,
+      path: "/admissions/admission-form",
+      parentNav: "Admissions",
+    },
+    {
+      label: "Multi Receipts",
+      icon: FileText,
+      path: "/income/multi-receipts",
+      parentNav: "Income",
+    },
+    {
+      label: "Duplicate Receipt",
+      icon: FileText,
+      path: "/income/duplicate-receipt",
+      parentNav: "Income",
+    },
+    {
+      label: "Cancellation Receipts",
+      icon: FileText,
+      path: "/income/cancellation-receipt",
+      parentNav: "Income",
+    },
+  ],
+};
+
 const ACCENT = {
   finance: "bg-emerald-500",
   teacher: "bg-sky-500",
@@ -84,15 +126,44 @@ const ACCENT = {
 export default function RoleLayout({ user }) {
   const { activeRole, logout } = useRole();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [expandedMenus, setExpandedMenus] = useState({});
   const location = useLocation();
   const meta = ROLE_META[activeRole] || {};
   const navItems = NAV_BY_ROLE[activeRole] || [];
   const accent = ACCENT[activeRole] || "bg-indigo-500";
+  const subNavItems = SUB_NAV_BY_ROLE[activeRole] || [];
 
   const isActive = (path) =>
     path === "/"
       ? location.pathname === "/"
       : location.pathname.startsWith(path);
+
+  // Toggle menu expansion
+  const toggleMenu = (label, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setExpandedMenus((prev) => ({
+      ...prev,
+      [label]: !prev[label],
+    }));
+  };
+
+  // Check if a parent has sub-items
+  const getSubItems = (parentLabel) => {
+    return subNavItems.filter((item) => item.parentNav === parentLabel);
+  };
+
+  // Check if any sub-item is active
+  const isSubItemActive = (subItems) => {
+    return subItems.some((item) => isActive(item.path));
+  };
+
+  // Auto-expand menu if sub-item is active
+  const shouldExpand = (label) => {
+    const subItems = getSubItems(label);
+    if (subItems.length === 0) return false;
+    return expandedMenus[label] || isSubItemActive(subItems);
+  };
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
@@ -155,20 +226,83 @@ export default function RoleLayout({ user }) {
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.path);
+            const subItems = getSubItems(item.label);
+            const hasSubItems = subItems.length > 0;
+            const isExpanded = shouldExpand(item.label);
+
             return (
-              <Link
-                key={item.path}
-                to={item.path}
-                onClick={() => setSidebarOpen(false)}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${
-                  active
-                    ? `${accent} text-white font-medium`
-                    : "text-slate-400 hover:bg-slate-800 hover:text-white"
-                }`}
-              >
-                <Icon className="w-4 h-4 shrink-0" />
-                <span>{item.label}</span>
-              </Link>
+              <div key={item.path || item.label}>
+                {/* Main nav item */}
+                {hasSubItems ? (
+                  // Expandable item with separate link and toggle
+                  <div
+                    className={`flex items-center rounded-lg transition-all ${
+                      active
+                        ? `${accent} text-white font-medium`
+                        : "text-slate-400 hover:bg-slate-800 hover:text-white"
+                    }`}
+                  >
+                    <Link
+                      to={item.path}
+                      onClick={() => setSidebarOpen(false)}
+                      className="flex items-center gap-3 px-3 py-2.5 flex-1 text-sm"
+                    >
+                      <Icon className="w-4 h-4 shrink-0" />
+                      <span>{item.label}</span>
+                    </Link>
+                    <button
+                      onClick={(e) => toggleMenu(item.label, e)}
+                      className="px-2 py-2.5 hover:text-white transition-colors"
+                      aria-label={isExpanded ? "Collapse" : "Expand"}
+                    >
+                      <ChevronDown
+                        className={`w-4 h-4 transition-transform duration-200 ${
+                          isExpanded ? "rotate-180" : ""
+                        }`}
+                      />
+                    </button>
+                  </div>
+                ) : (
+                  // Regular link
+                  <Link
+                    to={item.path}
+                    onClick={() => setSidebarOpen(false)}
+                    className={`flex items-center gap-3 px-3 py-2.5 w-full text-sm rounded-lg transition-all ${
+                      active
+                        ? `${accent} text-white font-medium`
+                        : "text-slate-400 hover:bg-slate-800 hover:text-white"
+                    }`}
+                  >
+                    <Icon className="w-4 h-4 shrink-0" />
+                    <span>{item.label}</span>
+                  </Link>
+                )}
+
+                {/* Sub-items */}
+                {hasSubItems && isExpanded && (
+                  <div className="ml-4 mt-0.5 space-y-0.5 border-l border-slate-700/40 pl-3">
+                    {subItems.map((subItem) => {
+                      const SubIcon = subItem.icon;
+                      const isSubActive = isActive(subItem.path);
+                      return (
+                        <Link
+                          key={subItem.path}
+                          to={subItem.path}
+                          onClick={() => setSidebarOpen(false)}
+                          className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${
+                            isSubActive
+                              ? `${accent} text-white font-medium`
+                              : "text-slate-400 hover:bg-slate-800 hover:text-white"
+                          }`}
+                        >
+                          <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                          <span>{subItem.label}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             );
           })}
         </nav>

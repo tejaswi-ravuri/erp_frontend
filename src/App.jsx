@@ -14,6 +14,12 @@ import FinanceDashboard from "@/pages/dashboards/FinanceDashboard";
 import TeacherDashboard from "@/pages/dashboards/TeacherDashboard";
 import PrincipalDashboard from "@/pages/dashboards/PrincipalDashboard";
 import AccountsManagerDashboard from "./pages/dashboards/AccountsManagerDashboard";
+import AdmissionEnquiry from "@/pages/AdmissionEnquiry";
+import AdmissionForm from "@/pages/AdmissionForm";
+import ApplicationForm from "@/pages/ApplicationForm";
+import MultiReceipts from "@/pages/MultiReceipts";
+import DuplicateReceipt from "@/pages/DuplicateReceipts";
+import IncomeCancellationRequest from "@/pages/IncomeCancellationRequest";
 
 // New pages
 import HallTicket from "@/pages/HallTicket";
@@ -81,6 +87,9 @@ const AuthenticatedApp = () => {
       <Route element={<RoleLayout user={user} />}>
         <Route path="/" element={<HomeDashboard />} />
         <Route path="/admissions" element={<BPAdmissions />} />
+        <Route path="/admissions/enquiry" element={<AdmissionEnquiry />} />
+        <Route path="/admissions/admission-form" element={<AdmissionForm />} />
+        <Route path="/admissions/applications" element={<ApplicationForm />} />
         <Route path="/students" element={<BPStudents />} />
         <Route path="/staff" element={<BPStaff />} />
         <Route path="/classes" element={<BPClasses />} />
@@ -98,6 +107,15 @@ const AuthenticatedApp = () => {
         <Route path="/hall-ticket" element={<HallTicket />} />
         <Route path="/homework-manager" element={<HomeworkManager />} />
         <Route path="/income" element={<BPIncome />} />
+        <Route path="/income/multi-receipts" element={<MultiReceipts />} />
+        <Route
+          path="/income/duplicate-receipt"
+          element={<DuplicateReceipt />}
+        />
+        <Route
+          path="/income/cancellation-receipt"
+          element={<IncomeCancellationRequest />}
+        />
       </Route>
       <Route path="*" element={<PageNotFound />} />
     </Routes>
