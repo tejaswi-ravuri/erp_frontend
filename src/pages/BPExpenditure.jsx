@@ -297,6 +297,8 @@ export default function BPExpenditure() {
 
   // Shared loading flag for delete-request / approve / reject row actions.
   const [actionId, setActionId] = useState(null);
+  // Record awaiting confirmation in the custom "Request Deletion?" popup.
+  const [deleteConfirmRecord, setDeleteConfirmRecord] = useState(null);
 
   const dateAndModeParams = {
     payment_mode: paymentModeFilter !== "All" ? paymentModeFilter : undefined,
@@ -479,16 +481,11 @@ export default function BPExpenditure() {
   };
 
   const requestDelete = async (r) => {
-    if (
-      !window.confirm(
-        "Request deletion of this expenditure record? An Admin Officer must approve before it's removed.",
-      )
-    )
-      return;
     setActionId(r._id);
     try {
       await expenditureApi.requestDelete(r._id);
       toast.success("Deletion requested. Waiting for Admin Officer approval.");
+      setDeleteConfirmRecord(null);
       load();
     } catch (err) {
       toast.error(apiErrorMessage(err));
@@ -799,7 +796,7 @@ export default function BPExpenditure() {
                               <button
                                 type="button"
                                 disabled={actionId === r._id}
-                                onClick={() => requestDelete(r)}
+                                onClick={() => setDeleteConfirmRecord(r)}
                                 className="p-1.5 rounded hover:bg-red-100 text-red-500 disabled:opacity-50"
                                 title="Request deletion"
                               >
@@ -1133,6 +1130,39 @@ export default function BPExpenditure() {
               className="bg-red-600 hover:bg-red-700 text-white gap-1.5"
             >
               {editSaving ? "Saving..." : "Save"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!deleteConfirmRecord}
+        onOpenChange={(open) => !open && setDeleteConfirmRecord(null)}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Request Deletion?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600 mt-1">
+            This sends a deletion request for{" "}
+            <span className="font-medium text-slate-800">
+              {deleteConfirmRecord?.category}
+            </span>{" "}
+            (₹{Number(deleteConfirmRecord?.amount || 0).toLocaleString("en-IN")}
+            ) to an Admin Officer. The record stays until they approve it.
+          </p>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setDeleteConfirmRecord(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => requestDelete(deleteConfirmRecord)}
+              disabled={actionId === deleteConfirmRecord?._id}
+              className="bg-red-600 hover:bg-red-700 text-white gap-1.5"
+            >
+              {actionId === deleteConfirmRecord?._id
+                ? "Requesting..."
+                : "Request Deletion"}
             </Button>
           </div>
         </DialogContent>
