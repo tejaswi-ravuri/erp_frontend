@@ -1,8 +1,20 @@
 import React from "react";
 import { Menu, Bell, LogOut, GraduationCap } from "lucide-react";
-import { entities } from "@/api/entityClient";
+import { authApi } from "../../api/authApi";
+import { useDispatch } from "react-redux";
+import { logout } from "@/store/authSlice";
+import { useNavigate } from "react-router-dom";
 
 export default function BPTopBar({ onMenuToggle, user }) {
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const handleLogout = async () => {
+    await authApi.logout();
+
+    dispatch(logout());
+
+    window.location.href = "/";
+  };
   return (
     <header className="sticky top-0 z-30 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between shadow-sm">
       <div className="flex items-center gap-3">
@@ -44,7 +56,7 @@ export default function BPTopBar({ onMenuToggle, user }) {
             </p>
           </div>
           <button
-            onClick={() => auth.logout("/")}
+            onClick={handleLogout}
             className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50"
             title="Logout"
           >

@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
-import { entities } from "@/api/entityClient";
-import { Plus, Printer } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import { studentApi, classApi, marksApi } from "@/api/api";
+import { useAuth } from "@/lib/AuthContext";
+import { Plus, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -17,7 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 
-const SUBJECTS = [
+const MARKS_SUBJECTS = [
   "Maths",
   "Science",
   "English",
@@ -44,20 +45,88 @@ const gradeColor = {
   D: "text-red-700 bg-red-50",
 };
 
+// Class model only has `grade` (no separate `section`) — see models/Class.js.
+const classLabel = (c) => (c ? `Class ${c.grade}` : "—");
+
+// `class` matches Marks.class (an ObjectId ref Class) - see models/Marks.js.
 const EMPTY_FORM = {
   student_id: "",
   student_name: "",
   class: "",
   exam_type: "Final",
-  subject: "Maths",
+  subject: "",
   marks_obtained: "",
   max_marks: "100",
 };
 
 export default function BPMarks() {
+  const { user } = useAuth();
+  const role = user?.role;
+  const isTeacher = role === "teacher";
+  const myId = user?.id || user?._id;
+
+  const [classes, setClasses] = useState([]);
+  useEffect(() => {
+    // classApi.list() already resolves to a plain array - don't re-unwrap
+    // with .data here, or `classes` ends up undefined.
+    classApi.list().then((data) => {
+      setClasses(data.data);
+    });
+  }, []);
+  const classesById = useMemo(
+    () => Object.fromEntries(classes.map((c) => [c._id, c])),
+    [classes],
+  );
+
+  const mySubjectsByClassId = useMemo(() => {
+    if (!isTeacher) return {};
+    const map = {};
+    classes.forEach((c) => {
+      const subjects =
+        c.my_subjects && c.my_subjects.length
+          ? c.my_subjects
+          : (c.subject_teachers || [])
+              .filter(
+                (st) =>
+                  String(st.teacher_id?._id || st.teacher_id) === String(myId),
+              )
+              .map((st) => st.subject);
+      if (subjects.length > 0) {
+        map[c._id] = new Set(subjects);
+      }
+    });
+    return map;
+  }, [classes, isTeacher, myId]);
+
+  const classTeacherClassIds = useMemo(
+    () =>
+      classes
+        .filter(
+          (c) =>
+            String(c.class_teacher_id?._id || c.class_teacher_id) ===
+            String(myId),
+        )
+        .map((c) => c._id),
+    [classes, myId],
+  );
+
+  const myClassIds = useMemo(
+    () => Object.keys(mySubjectsByClassId),
+    [mySubjectsByClassId],
+  );
+
+  const canSeeAllSubjectsForRow = (classId) =>
+    !isTeacher || classTeacherClassIds.includes(classId);
+
+  const canSeeSubjectForRow = (classId, subject) => {
+    if (!isTeacher) return true;
+    if (canSeeAllSubjectsForRow(classId)) return true;
+    return mySubjectsByClassId[classId]?.has(subject) || false;
+  };
+
   const [marks, setMarks] = useState([]);
   const [students, setStudents] = useState([]);
-  const [classFilter, setClassFilter] = useState("All");
+  const [classIdFilter, setClassIdFilter] = useState("All");
   const [examFilter, setExamFilter] = useState("Final");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -65,10 +134,7 @@ export default function BPMarks() {
 
   const load = async () => {
     setLoading(true);
-    const [m, s] = await Promise.all([
-      entities.Marks.list(),
-      entities.Student.list(),
-    ]);
+    const [m, s] = await Promise.all([marksApi.list(), studentApi.list()]);
     setMarks(m);
     setStudents(s.filter((st) => st.status === "Active"));
     setLoading(false);
@@ -78,9 +144,23 @@ export default function BPMarks() {
     load();
   }, []);
 
+  const subjectOptionsForForm = useMemo(() => {
+    if (!isTeacher) return MARKS_SUBJECTS;
+    if (!form.class) return [];
+    const mySubjects = Array.from(mySubjectsByClassId[form.class] || []);
+    return mySubjects.filter((s) => MARKS_SUBJECTS.includes(s));
+  }, [isTeacher, form.class, mySubjectsByClassId]);
+
+  const canSubmitForm =
+    form.student_id &&
+    form.subject &&
+    form.marks_obtained !== "" &&
+    (!isTeacher || subjectOptionsForForm.includes(form.subject));
+
   const save = async () => {
+    if (!canSubmitForm) return;
     const grade = getGrade(Number(form.marks_obtained), Number(form.max_marks));
-    await entities.Marks.create({
+    await marksApi.create({
       ...form,
       marks_obtained: Number(form.marks_obtained),
       max_marks: Number(form.max_marks),
@@ -91,15 +171,34 @@ export default function BPMarks() {
     load();
   };
 
-  const filteredStudents = students.filter(
-    (s) => classFilter === "All" || s.class === classFilter,
+  // Students visible at all: a Teacher only ever sees students in a class
+  // they teach a subject in or are Class Teacher of.
+  const visibleStudents = useMemo(() => {
+    if (!isTeacher) return students;
+    return students.filter((s) => myClassIds.includes(s.class?._id || s.class));
+  }, [students, isTeacher, myClassIds]);
+
+  const filteredStudents = visibleStudents.filter(
+    (s) =>
+      classIdFilter === "All" || (s.class?._id || s.class) === classIdFilter,
   );
 
-  const getStudentMarks = (studentId) => {
-    return marks.filter(
+  const classFilterOptions = isTeacher
+    ? classes.filter((c) => myClassIds.includes(c._id))
+    : classes;
+
+  const classOptionsForForm = classFilterOptions;
+  const studentOptionsForForm = useMemo(() => {
+    if (!form.class) return [];
+    return visibleStudents.filter(
+      (s) => (s.class?._id || s.class) === form.class,
+    );
+  }, [visibleStudents, form.class]);
+
+  const getStudentMarks = (studentId) =>
+    marks.filter(
       (m) => m.student_id === studentId && m.exam_type === examFilter,
     );
-  };
 
   const getSubjectMark = (studentId, subject) => {
     const m = marks.find(
@@ -111,10 +210,8 @@ export default function BPMarks() {
     return m ? m.marks_obtained : null;
   };
 
-  const getTotal = (studentId) => {
-    const sm = getStudentMarks(studentId);
-    return sm.reduce((s, m) => s + (m.marks_obtained || 0), 0);
-  };
+  const getTotal = (studentId) =>
+    getStudentMarks(studentId).reduce((s, m) => s + (m.marks_obtained || 0), 0);
 
   const getMax = (studentId) => getStudentMarks(studentId).length * 100;
 
@@ -123,7 +220,11 @@ export default function BPMarks() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold text-slate-800">Marks</h2>
-          <p className="text-sm text-slate-500">Academic performance records</p>
+          <p className="text-sm text-slate-500">
+            {isTeacher
+              ? "Your subject's marks - full overview for classes where you're Class Teacher"
+              : "Academic performance records"}
+          </p>
         </div>
         <Button
           onClick={() => setShowForm(true)}
@@ -134,15 +235,15 @@ export default function BPMarks() {
       </div>
 
       <div className="flex gap-3">
-        <Select value={classFilter} onValueChange={setClassFilter}>
-          <SelectTrigger className="w-36 text-sm">
+        <Select value={classIdFilter} onValueChange={setClassIdFilter}>
+          <SelectTrigger className="w-48 text-sm">
             <SelectValue placeholder="Class" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="All">All Classes</SelectItem>
-            {["8", "9", "10"].map((c) => (
-              <SelectItem key={c} value={c}>
-                Class {c}
+            {classFilterOptions.map((c) => (
+              <SelectItem key={c._id} value={c._id}>
+                {classLabel(c)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -169,7 +270,10 @@ export default function BPMarks() {
                 <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase sticky left-0 bg-slate-50">
                   Student
                 </th>
-                {SUBJECTS.map((s) => (
+                <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase">
+                  Class
+                </th>
+                {MARKS_SUBJECTS.map((s) => (
                   <th
                     key={s}
                     className="text-center px-3 py-3 text-xs font-semibold text-slate-500 uppercase"
@@ -192,7 +296,7 @@ export default function BPMarks() {
               {loading && (
                 <tr>
                   <td
-                    colSpan={10}
+                    colSpan={MARKS_SUBJECTS.length + 5}
                     className="px-4 py-8 text-center text-slate-400"
                   >
                     Loading...
@@ -201,24 +305,32 @@ export default function BPMarks() {
               )}
               {!loading &&
                 filteredStudents.map((s) => {
-                  const total = getTotal(s.id);
-                  const maxTotal = getMax(s.id);
+                  const classId = s.class?._id || s.class;
+                  const rowSeesAll = canSeeAllSubjectsForRow(classId);
+                  const total = getTotal(s._id);
+                  const maxTotal = getMax(s._id);
                   const pct =
                     maxTotal > 0 ? Math.round((total / maxTotal) * 100) : 0;
                   const grade = maxTotal > 0 ? getGrade(total, maxTotal) : "—";
                   return (
-                    <tr key={s.id} className="hover:bg-slate-50">
+                    <tr key={s._id} className="hover:bg-slate-50">
                       <td className="px-4 py-3 font-medium text-slate-800 sticky left-0 bg-white">
                         {s.full_name}
                       </td>
-                      {SUBJECTS.map((subj) => {
-                        const val = getSubjectMark(s.id, subj);
+                      <td className="px-3 py-3 text-slate-500 whitespace-nowrap">
+                        {classLabel(classesById[classId])}
+                      </td>
+                      {MARKS_SUBJECTS.map((subj) => {
+                        const canSee = canSeeSubjectForRow(classId, subj);
+                        const val = canSee ? getSubjectMark(s._id, subj) : null;
                         return (
                           <td
                             key={subj}
                             className="px-3 py-3 text-center text-slate-700"
                           >
-                            {val !== null ? (
+                            {!canSee ? (
+                              <Lock className="w-3.5 h-3.5 text-slate-300 inline" />
+                            ) : val !== null ? (
                               val
                             ) : (
                               <span className="text-slate-300">—</span>
@@ -226,14 +338,19 @@ export default function BPMarks() {
                           </td>
                         );
                       })}
+                      {/* Total/%/Grade only shown for rows where this viewer
+                          can see every subject: either they aren't a
+                          Teacher, or they're the Class Teacher of this
+                          student's class. A plain subject teacher only ever
+                          sees their own subject's number. */}
                       <td className="px-3 py-3 text-center font-semibold text-slate-800">
-                        {total || "—"}
+                        {rowSeesAll ? total || "—" : "—"}
                       </td>
                       <td className="px-3 py-3 text-center text-slate-600">
-                        {pct ? `${pct}%` : "—"}
+                        {rowSeesAll && pct ? `${pct}%` : "—"}
                       </td>
                       <td className="px-3 py-3 text-center">
-                        {grade !== "—" && (
+                        {rowSeesAll && grade !== "—" && (
                           <span
                             className={`px-2 py-0.5 rounded text-xs font-bold ${gradeColor[grade] || ""}`}
                           >
@@ -255,33 +372,75 @@ export default function BPMarks() {
             <DialogTitle>Add Marks Entry</DialogTitle>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-3 mt-2">
-            <div className="col-span-2">
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Class
+              </label>
+              <Select
+                value={form.class}
+                onValueChange={(v) =>
+                  setForm({
+                    ...form,
+                    class: v,
+                    student_id: "",
+                    student_name: "",
+                    subject: "", // reset - depends on the newly selected class
+                  })
+                }
+              >
+                <SelectTrigger className="text-sm w-full">
+                  <SelectValue placeholder="Select class" />
+                </SelectTrigger>
+                <SelectContent>
+                  {classOptionsForForm.map((c) => (
+                    <SelectItem key={c._id} value={c._id}>
+                      {classLabel(c)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {isTeacher && classOptionsForForm.length === 0 && (
+                <p className="text-[11px] text-red-500 mt-1">
+                  You aren't assigned to teach any class yet.
+                </p>
+              )}
+            </div>
+            <div>
               <label className="text-xs font-medium text-slate-600 mb-1 block">
                 Student
               </label>
               <Select
                 value={form.student_id}
                 onValueChange={(v) => {
-                  const s = students.find((st) => st.id === v);
+                  const s = studentOptionsForForm.find((st) => st._id === v);
                   setForm({
                     ...form,
                     student_id: v,
                     student_name: s?.full_name || "",
-                    class: s?.class || "",
                   });
                 }}
+                disabled={!form.class}
               >
-                <SelectTrigger className="text-sm">
-                  <SelectValue placeholder="Select student" />
+                <SelectTrigger className="text-sm w-full">
+                  <SelectValue
+                    placeholder={
+                      form.class ? "Select student" : "Pick a class first"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  {students.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.full_name} (Class {s.class})
+                  {studentOptionsForForm.map((s) => (
+                    <SelectItem key={s._id} value={s._id}>
+                      {s.full_name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {form.class && studentOptionsForForm.length === 0 && (
+                <p className="text-[11px] text-red-500 mt-1">
+                  No students found in this class.
+                </p>
+              )}
             </div>
             <div>
               <label className="text-xs font-medium text-slate-600 mb-1 block">
@@ -291,7 +450,7 @@ export default function BPMarks() {
                 value={form.exam_type}
                 onValueChange={(v) => setForm({ ...form, exam_type: v })}
               >
-                <SelectTrigger className="text-sm">
+                <SelectTrigger className="text-sm w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -310,18 +469,32 @@ export default function BPMarks() {
               <Select
                 value={form.subject}
                 onValueChange={(v) => setForm({ ...form, subject: v })}
+                disabled={isTeacher && !form.class}
               >
-                <SelectTrigger className="text-sm">
-                  <SelectValue />
+                <SelectTrigger className="text-sm w-full">
+                  <SelectValue
+                    placeholder={
+                      isTeacher && !form.class
+                        ? "Pick a class first"
+                        : "Subject"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  {SUBJECTS.map((s) => (
+                  {subjectOptionsForForm.map((s) => (
                     <SelectItem key={s} value={s}>
                       {s}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {isTeacher &&
+                form.class &&
+                subjectOptionsForForm.length === 0 && (
+                  <p className="text-[11px] text-red-500 mt-1">
+                    You don't teach a valid Marks subject for this class.
+                  </p>
+                )}
             </div>
             <div>
               <label className="text-xs font-medium text-slate-600 mb-1 block">
@@ -356,6 +529,7 @@ export default function BPMarks() {
             </Button>
             <Button
               onClick={save}
+              disabled={!canSubmitForm}
               className="bg-emerald-600 hover:bg-emerald-700 text-white"
             >
               Save

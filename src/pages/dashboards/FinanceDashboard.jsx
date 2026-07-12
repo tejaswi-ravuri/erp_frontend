@@ -1,249 +1,426 @@
-import React, { useState, useEffect } from "react";
-import { entities } from "@/api/entityClient";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
 import {
-  DollarSign,
+  Building2,
+  TrendingUp,
   TrendingDown,
-  CreditCard,
-  FileText,
-  Receipt,
-  BarChart2,
-  ArrowUpRight,
-  Clock,
+  Wallet,
+  ArrowRight,
+  RefreshCw,
 } from "lucide-react";
 import {
   BarChart,
   Bar,
   XAxis,
   YAxis,
+  CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Cell,
+  Legend,
 } from "recharts";
+import { useNavigate } from "react-router-dom";
+import TopBar from "@/components/layout/TopBar";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { analyticsApi, branchApi } from "@/api/api";
+import {
+  formatCurrency,
+  formatCurrencyShort,
+  formatNumber,
+} from "@/lib/formatCurrency.js";
 
-const StatCard = ({ icon: Icon, label, value, sub, color }) => (
-  <div className={`bg-white rounded-2xl border border-slate-100 shadow-sm p-5`}>
-    <div className="flex items-center justify-between mb-3">
-      <div
-        className={`w-10 h-10 rounded-xl flex items-center justify-center ${color}`}
-      >
-        <Icon className="w-5 h-5 text-white" />
+function StatCard({ label, value, sub, icon: Icon, color, onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      className={`bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-md transition-all ${onClick ? "cursor-pointer hover:-translate-y-0.5" : ""}`}
+    >
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
+            {label}
+          </p>
+          <p className="text-3xl font-bold text-slate-800 tracking-tight">
+            {value}
+          </p>
+        </div>
+        <div
+          className={`w-12 h-12 rounded-lg flex items-center justify-center ${color} flex-shrink-0`}
+        >
+          <Icon size={24} className="text-white" />
+        </div>
       </div>
-      <ArrowUpRight className="w-4 h-4 text-slate-300" />
+      {sub && <p className="text-sm text-slate-500 leading-relaxed">{sub}</p>}
     </div>
-    <p className="text-2xl font-black text-slate-800">{value}</p>
-    <p className="text-xs font-medium text-slate-500 mt-0.5">{label}</p>
-    {sub && <p className="text-[10px] text-slate-400 mt-1">{sub}</p>}
-  </div>
-);
+  );
+}
+
+function BranchCard({ branch, income, expenditure, net, students }) {
+  const isPositive = net >= 0;
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-md transition-shadow h-full">
+      <p className="font-semibold text-slate-900 text-base mb-4 line-clamp-2">
+        {branch}
+      </p>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <span className="text-sm text-slate-600">Students</span>
+          <span className="font-semibold text-slate-800">
+            {formatNumber(students)}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <span className="text-sm text-slate-600">Income</span>
+          <span className="font-semibold text-emerald-600">
+            {formatCurrencyShort(income)}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <span className="text-sm text-slate-600">Expenses</span>
+          <span className="font-semibold text-red-600">
+            {formatCurrencyShort(expenditure)}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between pt-2">
+          <span className="text-sm font-semibold text-slate-700">
+            Net Balance
+          </span>
+          <span
+            className={`text-lg font-bold ${isPositive ? "text-emerald-600" : "text-red-600"}`}
+          >
+            {isPositive ? "+" : ""}
+            {formatCurrencyShort(net)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function FinanceDashboard() {
-  const [stats, setStats] = useState({
-    income: 0,
-    expenditure: 0,
-    pending: 0,
-    paid: 0,
-    paidCount: 0,
-    pendingCount: 0,
-  });
-  const [recentFees, setRecentFees] = useState([]);
-  const [chartData, setChartData] = useState([]);
+  const navigate = useNavigate();
+  const [stats, setStats] = useState(null);
+  const [allBranches, setAllBranches] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedBranch, setSelectedBranch] = useState("all");
+  const [showAllBranches, setShowAllBranches] = useState(false);
 
+  // Fetch all branches on mount (for dropdown)
   useEffect(() => {
-    Promise.all([
-      entities.FeePayment.list("-payment_date", 50),
-      entities.Expenditure.list("-date", 10),
-    ]).then(([fees, exps]) => {
-      const paid = fees
-        .filter((f) => f.status === "Paid")
-        .reduce((s, f) => s + (f.amount || 0), 0);
-      const pending = fees
-        .filter((f) => f.status === "Pending")
-        .reduce((s, f) => s + (f.amount || 0), 0);
-      const expenditure = exps.reduce((s, e) => s + (e.amount || 0), 0);
-
-      // Monthly chart data
-      const monthMap = {};
-      fees.forEach((f) => {
-        if (!f.payment_date) return;
-        const mon = f.payment_date.slice(0, 7);
-        if (!monthMap[mon]) monthMap[mon] = { income: 0, expenditure: 0 };
-        if (f.status === "Paid") monthMap[mon].income += f.amount || 0;
-      });
-      exps.forEach((e) => {
-        if (!e.date) return;
-        const mon = e.date.slice(0, 7);
-        if (!monthMap[mon]) monthMap[mon] = { income: 0, expenditure: 0 };
-        monthMap[mon].expenditure += e.amount || 0;
-      });
-      const chart = Object.entries(monthMap)
-        .sort()
-        .slice(-6)
-        .map(([m, v]) => ({
-          month: m.slice(5) + "/" + m.slice(2, 4),
-          income: v.income,
-          exp: v.expenditure,
-        }));
-
-      setStats({
-        income: paid,
-        expenditure,
-        pending,
-        paid: fees.filter((f) => f.status === "Paid").length,
-        pendingCount: fees.filter((f) => f.status === "Pending").length,
-      });
-      setRecentFees(fees.slice(0, 8));
-      setChartData(chart);
-      setLoading(false);
-    });
+    branchApi
+      .list()
+      .then((data) => {
+        const branches = data?.data || data || [];
+        setAllBranches(branches);
+      })
+      .catch((err) => console.error("Failed to fetch branches:", err));
   }, []);
 
-  const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+  // Fetch dashboard stats
+  const load = () => {
+    setLoading(true);
+    analyticsApi
+      .dashboardStats()
+      .then((d) => {
+        console.log("Dashboard stats:", d);
+        setStats(d);
+      })
+      .catch((err) => {
+        console.error("Failed to fetch dashboard stats:", err);
+        setStats(null);
+      })
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  // Determine which data to display based on selected branch
+  let displayStats = null;
+  let displayBranches = [];
+  let displayTitle = "All Branches";
+
+  if (stats) {
+    const data = stats;
+
+    if (selectedBranch === "all") {
+      displayStats = data.combined_stats;
+      displayBranches = data.all_branches || [];
+      displayTitle = `All Branches (${displayBranches.length})`;
+    } else {
+      displayStats = data.combined_stats;
+      const selected = data.all_branches?.find(
+        (b) => String(b._id) === String(selectedBranch),
+      );
+      displayBranches = selected ? [selected] : [];
+      const branchName = allBranches.find(
+        (b) => String(b._id) === String(selectedBranch),
+      )?.name;
+      displayTitle = branchName || "Selected Branch";
+    }
+  }
+
+  // Chart data (top 10 branches)
+  const chartData = (displayBranches || [])
+    .sort((a, b) => b.total_income - a.total_income)
+    .slice(0, 10)
+    .map((b) => ({
+      name: b.code || b.name,
+      Income: b.total_income,
+      Expenditure: b.total_expenditure,
+    }));
+
+  const visibleBranches = showAllBranches
+    ? displayBranches
+    : displayBranches.slice(0, 8);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-black text-slate-800">
-          Finance Dashboard
-        </h1>
-        <p className="text-sm text-slate-500">
-          Real-time financial overview · MasterMinds ERP
-        </p>
-      </div>
+    <div className="bg-slate-50 min-h-screen">
+      <div className="page-content p-6 space-y-8">
+        {/* Controls Section */}
+        {stats?.accessible_branches && (
+          <div className="bg-white rounded-xl border border-slate-200 p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+              <label className="text-sm font-semibold text-slate-700">
+                Select Branch:
+              </label>
+              <Select
+                value={selectedBranch}
+                onValueChange={setSelectedBranch}
+                disabled={loading}
+              >
+                <SelectTrigger className="w-full sm:w-72 h-10">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {allBranches
+                    .filter((b) =>
+                      stats.accessible_branches.includes(String(b._id)),
+                    )
+                    .map((branch) => (
+                      <SelectItem key={branch._id} value={String(branch._id)}>
+                        {branch.name} ({branch.code})
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
 
-      {/* Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          icon={DollarSign}
-          label="Total Fee Collected"
-          value={loading ? "..." : fmt(stats.income)}
-          sub={`${stats.paid} payments`}
-          color="bg-emerald-500"
-        />
-        <StatCard
-          icon={Clock}
-          label="Pending Fees"
-          value={loading ? "..." : fmt(stats.pending)}
-          sub={`${stats.pendingCount} students`}
-          color="bg-red-500"
-        />
-        <StatCard
-          icon={TrendingDown}
-          label="Total Expenditure"
-          value={loading ? "..." : fmt(stats.expenditure)}
-          color="bg-rose-500"
-        />
-        <StatCard
-          icon={BarChart2}
-          label="Net Balance"
-          value={loading ? "..." : fmt(stats.income - stats.expenditure)}
-          color="bg-indigo-500"
-        />
-      </div>
-
-      {/* Chart + Recent */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-          <h3 className="text-sm font-bold text-slate-700 mb-4">
-            Monthly Income vs Expenditure
-          </h3>
-          {chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={chartData} barSize={16}>
-                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-                <YAxis
-                  tick={{ fontSize: 11 }}
-                  tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
-                />
-                <Tooltip formatter={(v) => `₹${v.toLocaleString("en-IN")}`} />
-                <Bar
-                  dataKey="income"
-                  name="Income"
-                  fill="#10b981"
-                  radius={[4, 4, 0, 0]}
-                />
-                <Bar
-                  dataKey="exp"
-                  name="Expenditure"
-                  fill="#f43f5e"
-                  radius={[4, 4, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <p className="text-slate-400 text-sm text-center py-12">
-              No data yet
-            </p>
-          )}
-        </div>
-
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-          <h3 className="text-sm font-bold text-slate-700 mb-4">
-            Recent Transactions
-          </h3>
-          <div className="space-y-3">
-            {recentFees.map((f) => (
-              <div key={f.id} className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-slate-700 truncate max-w-[120px]">
-                    {f.student_name}
-                  </p>
-                  <p className="text-[10px] text-slate-400">
-                    {f.fee_type} · {f.payment_date}
-                  </p>
-                </div>
-                <span
-                  className={`text-xs font-bold ${f.status === "Paid" ? "text-emerald-600" : "text-red-500"}`}
-                >
-                  {fmt(f.amount)}
-                </span>
-              </div>
-            ))}
-            {recentFees.length === 0 && !loading && (
-              <p className="text-slate-400 text-xs">No transactions yet</p>
-            )}
+        {/* Summary Statistics */}
+        <div>
+          <h2 className="text-lg font-bold text-slate-900 mb-4">
+            Financial Summary
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <StatCard
+              label="Total Branches"
+              value={
+                loading
+                  ? "—"
+                  : selectedBranch === "all"
+                    ? formatNumber(displayBranches.length)
+                    : "1"
+              }
+              sub={
+                selectedBranch === "all"
+                  ? "Accessible branches"
+                  : "Selected branch"
+              }
+              icon={Building2}
+              color="bg-indigo-600"
+            />
+            <StatCard
+              label="Total Income"
+              value={
+                loading
+                  ? "—"
+                  : formatCurrencyShort(displayStats?.total_income || 0)
+              }
+              sub={`₹${formatNumber(displayStats?.total_income || 0)}`}
+              icon={TrendingUp}
+              color="bg-emerald-600"
+              onClick={() => navigate("/income")}
+            />
+            <StatCard
+              label="Total Expenditure"
+              value={
+                loading
+                  ? "—"
+                  : formatCurrencyShort(displayStats?.total_expenditure || 0)
+              }
+              sub={`₹${formatNumber(displayStats?.total_expenditure || 0)}`}
+              icon={TrendingDown}
+              color="bg-red-600"
+              onClick={() => navigate("/tracking-expenses")}
+            />
+            <StatCard
+              label="Net Balance"
+              value={
+                loading
+                  ? "—"
+                  : formatCurrencyShort(displayStats?.net_balance || 0)
+              }
+              sub={
+                (displayStats?.net_balance || 0) >= 0
+                  ? "✓ Surplus"
+                  : "⚠ Deficit"
+              }
+              icon={Wallet}
+              color={
+                (displayStats?.net_balance || 0) >= 0
+                  ? "bg-purple-600"
+                  : "bg-orange-600"
+              }
+            />
           </div>
         </div>
-      </div>
 
-      {/* Quick Links */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          {
-            label: "Fee Payments",
-            icon: CreditCard,
-            to: "/fees",
-            color: "bg-emerald-50 text-emerald-700",
-          },
-          {
-            label: "Expenditure",
-            icon: TrendingDown,
-            to: "/expenditure",
-            color: "bg-rose-50 text-rose-700",
-          },
-          {
-            label: "Fee Report",
-            icon: FileText,
-            to: "/student-fee-report",
-            color: "bg-indigo-50 text-indigo-700",
-          },
-          {
-            label: "Student Receipt",
-            icon: Receipt,
-            to: "/student-receipt",
-            color: "bg-amber-50 text-amber-700",
-          },
-        ].map(({ label, icon: Icon, to, color }) => (
-          <Link
-            key={label}
-            to={to}
-            className={`${color} rounded-xl p-4 flex items-center gap-3 hover:shadow-sm transition-shadow border border-transparent hover:border-current/10`}
+        {/* Chart Section */}
+        {chartData.length > 0 && (
+          <div className="bg-white rounded-xl border border-slate-200 p-6">
+            <h2 className="text-lg font-bold text-slate-900 mb-6">
+              {selectedBranch === "all"
+                ? "Branch Performance — Income vs Expenditure"
+                : "Income vs Expenditure"}
+            </h2>
+            <div className="w-full h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={chartData}
+                  margin={{ top: 20, right: 30, left: 0, bottom: 40 }}
+                  barGap={8}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis
+                    dataKey="name"
+                    tick={{ fontSize: 11, fill: "#64748b" }}
+                    angle={-45}
+                    textAnchor="end"
+                    height={80}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: "#64748b" }}
+                    tickFormatter={(v) => `₹${(v / 100000).toFixed(0)}L`}
+                  />
+                  <Tooltip
+                    formatter={(v) => formatCurrency(v)}
+                    contentStyle={{
+                      borderRadius: 8,
+                      border: "1px solid #e2e8f0",
+                      backgroundColor: "#ffffff",
+                      fontSize: 12,
+                    }}
+                  />
+                  <Legend wrapperStyle={{ paddingTop: 20 }} iconType="square" />
+                  <Bar
+                    dataKey="Income"
+                    fill="#10b981"
+                    radius={[6, 6, 0, 0]}
+                    barSize={40}
+                  />
+                  <Bar
+                    dataKey="Expenditure"
+                    fill="#ef4444"
+                    radius={[6, 6, 0, 0]}
+                    barSize={40}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        {/* Branches Grid Section */}
+        {selectedBranch === "all" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-slate-900">
+                {displayTitle}
+              </h2>
+              {displayBranches.length > 8 && (
+                <button
+                  onClick={() => setShowAllBranches((p) => !p)}
+                  className="text-sm font-semibold text-indigo-600 hover:text-indigo-700 flex items-center gap-1.5 transition-colors"
+                >
+                  {showAllBranches
+                    ? "Show less"
+                    : `Show all (${displayBranches.length})`}
+                  <ArrowRight size={14} />
+                </button>
+              )}
+            </div>
+
+            {loading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {[...Array(8)].map((_, i) => (
+                  <div
+                    key={i}
+                    className="bg-white rounded-xl border border-slate-200 h-40 animate-pulse"
+                  />
+                ))}
+              </div>
+            ) : displayBranches.length === 0 ? (
+              <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
+                <Building2 className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-500 font-medium">
+                  No branch data found
+                </p>
+                <p className="text-sm text-slate-400 mt-1">
+                  Add students and record payments to see branch-wise stats.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {visibleBranches.map((b) => (
+                  <BranchCard
+                    key={b._id}
+                    branch={b.name}
+                    income={b.total_income}
+                    expenditure={b.total_expenditure}
+                    net={b.net_balance}
+                    students={b.students}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Quick Action Buttons */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <button
+            onClick={() => navigate("/tracking-expenses")}
+            className="bg-gradient-to-br from-indigo-600 to-indigo-700 text-white rounded-xl p-6 font-semibold hover:shadow-lg transition-all hover:-translate-y-1 text-left flex items-end justify-between min-h-24"
           >
-            <Icon className="w-5 h-5" />
-            <span className="text-sm font-semibold">{label}</span>
-          </Link>
-        ))}
+            <div>
+              <p className="text-sm opacity-90 mb-1">Manage Finances</p>
+              <p className="text-lg">Track Expenses & Ledger</p>
+            </div>
+            <TrendingUp size={32} className="opacity-30" />
+          </button>
+          <button
+            onClick={() => navigate("/income")}
+            className="bg-gradient-to-br from-emerald-600 to-emerald-700 text-white rounded-xl p-6 font-semibold hover:shadow-lg transition-all hover:-translate-y-1 text-left flex items-end justify-between min-h-24"
+          >
+            <div>
+              <p className="text-sm opacity-90 mb-1">Add Income</p>
+              <p className="text-lg">Record Revenue</p>
+            </div>
+            <Wallet size={32} className="opacity-30" />
+          </button>
+        </div>
       </div>
     </div>
   );

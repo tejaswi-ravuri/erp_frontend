@@ -1,12 +1,9 @@
 import React, { useState } from "react";
-import { useDispatch, useSelector } from "react-redux";
+import { authApi } from "@/api/authApi";
 import { useRole } from "@/lib/RoleContext";
-import {
-  loginThunk,
-  selectAuthLoading,
-  selectAuthError,
-} from "@/store/authSlice";
 import { GraduationCap, ArrowRight, Sparkles, Eye, EyeOff } from "lucide-react";
+import { useDispatch } from "react-redux";
+import { setUser } from "../store/authSlice";
 
 const BACKEND_TO_FRONTEND_ROLE = {
   admin_officer: "finance",
@@ -19,8 +16,8 @@ const BACKEND_TO_FRONTEND_ROLE = {
 
 export default function RoleLogin() {
   const dispatch = useDispatch();
-  const isLoading = useSelector(selectAuthLoading);
-  const authError = useSelector(selectAuthError);
+  const [isLoading, setIsLoading] = useState(false);
+  const [authError, setAuthError] = useState("");
   const { selectRole } = useRole();
 
   const [email, setEmail] = useState("");
@@ -29,13 +26,38 @@ export default function RoleLogin() {
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    const result = await dispatch(loginThunk({ email, password }));
-    if (loginThunk.fulfilled.match(result)) {
-      const user = result.payload;
-      const mappedRole = BACKEND_TO_FRONTEND_ROLE[user.role];
-      if (mappedRole) {
-        selectRole(mappedRole); // ← sets activeRole → App.jsx re-renders → dashboard
+
+    if (!email || !password) return;
+
+    setIsLoading(true);
+    setAuthError("");
+
+    try {
+      const data = await authApi.login(email, password);
+
+      if (data.accessToken) {
+        localStorage.setItem("mm_access_token", data.accessToken);
       }
+      if (data.user) {
+        localStorage.setItem("mm_user", JSON.stringify(data.user));
+        dispatch(setUser(data.user));
+
+        const mappedRole = BACKEND_TO_FRONTEND_ROLE[data.user.role];
+
+        if (mappedRole) {
+          localStorage.setItem("mm_erp_role", mappedRole);
+          selectRole(mappedRole);
+        }
+      }
+    } catch (err) {
+      console.log(err);
+      setAuthError(
+        err.response?.data?.error ||
+          err.response?.data?.message ||
+          "Login failed",
+      );
+    } finally {
+      setIsLoading(false);
     }
   };
 

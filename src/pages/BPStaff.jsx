@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from "react";
-import { entities } from "@/api/entityClient";
-import { Plus, User, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { userApi } from "@/api/api";
+import { useAuth } from "@/lib/AuthContext";
+import {
+  Plus,
+  User,
+  ChevronLeft,
+  ChevronRight,
+  Pencil,
+  Trash2,
+  AlertTriangle,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -16,36 +25,86 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 import StatusBadge from "@/components/bp/StatusBadge";
+import { SUBJECTS } from "@/lib/constants.js";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const ROLE_OPTIONS = [
+  { value: "teacher", label: "Teacher" },
+  // { value: "accounts_manager", label: "Accounts Manager" },
+];
 
-const EMPTY = {
-  staff_id: "",
-  full_name: "",
-  role: "Teacher",
-  subject_taught: "",
-  qualification: "",
-  phone: "",
-  email: "",
-  address: "",
-  joining_date: new Date().toISOString().split("T")[0],
-  salary: "",
-  status: "Active",
+const PINCODE_RE = /^[1-9][0-9]{5}$/;
+const EMPTY_ADDRESS = {
+  line1: "",
+  line2: "",
+  city: "",
+  district: "",
+  state: "",
+  pincode: "",
+  country: "India",
 };
 
+// staff_id does not exist on the User schema at all - dropped. password
+// is new (User requires one; the old Staff-as-a-separate-entity form
+// never needed it). status is is_active (Boolean), not an enum string.
+// subject_taught is an array (a teacher can teach more than one subject) -
+// see models/User.js.
+const EMPTY_FORM = {
+  full_name: "",
+  role: "teacher",
+  email: "",
+  password: "",
+  subject_taught: [],
+  qualification: "",
+  phone: "",
+  address: { ...EMPTY_ADDRESS },
+  joining_date: new Date().toISOString().split("T")[0],
+  salary: "",
+  is_active: true,
+};
+
+const randomPassword = () =>
+  Math.random().toString(36).slice(-6) +
+  Math.random().toString(36).slice(-4).toUpperCase();
+
+// Format for display wherever subject_taught is shown as plain text -
+// defensive against legacy string data that predates the array schema.
+const formatSubjects = (val) =>
+  Array.isArray(val) && val.length ? val.join(", ") : "—";
+
 export default function BPStaff() {
+  const { user } = useAuth();
   const [staff, setStaff] = useState([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState(EMPTY);
+  const [editingId, setEditingId] = useState(null); // null = "add" mode
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [confirmDeleteStaff, setConfirmDeleteStaff] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
+  // Row-level Edit/Delete controls are only shown to viewers who actually
+  // have Staff.update/Staff.delete permission (see rbac/permissions.js -
+  // PRINCIPAL and ADMIN_OFFICER, not TEACHER or ACCOUNTS_MANAGER, who only
+  // have Staff.read). This mirrors that at a coarse "not a teacher" level
+  // for now; if an ACCOUNTS_MANAGER ever views this screen they'd still
+  // see these buttons even though the backend would reject the write -
+  // worth tightening to an explicit role allow-list if that's a real case.
+  const canManageStaff = user?.role !== "teacher";
+
   const load = async () => {
     setLoading(true);
-    const data = await entities.Staff.list();
+    const data = await userApi.list({ exclude_role: "student" });
     setStaff(data);
     setLoading(false);
   };
@@ -55,8 +114,6 @@ export default function BPStaff() {
   }, []);
 
   const totalPages = Math.max(1, Math.ceil(staff.length / pageSize));
-  // If staff shrinks (e.g. after a future delete) and the current page
-  // no longer exists, clamp back to the last valid page.
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [totalPages, page]);
@@ -65,15 +122,109 @@ export default function BPStaff() {
   const rangeStart = staff.length === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(page * pageSize, staff.length);
 
-  const save = async () => {
-    await entities.Staff.create({
-      ...form,
-      salary: Number(form.salary),
+  const openAddForm = () => {
+    setEditingId(null);
+    setForm({
+      ...EMPTY_FORM,
+      address: { ...EMPTY_ADDRESS },
+      subject_taught: [],
     });
-    setShowForm(false);
-    setForm(EMPTY);
-    setPage(1);
-    load();
+    setShowForm(true);
+  };
+
+  const openEditForm = (s) => {
+    setEditingId(s._id);
+    setForm({
+      full_name: s.full_name || "",
+      role: s.role || "teacher",
+      email: s.email || "",
+      password: "", // left blank = unchanged
+      // Defensive: normalize whatever shape comes back (array, legacy
+      // comma-string, plain string, or nothing) into a clean array.
+      subject_taught: Array.isArray(s.subject_taught)
+        ? s.subject_taught
+        : s.subject_taught
+          ? String(s.subject_taught)
+              .split(",")
+              .map((x) => x.trim())
+              .filter(Boolean)
+          : [],
+      qualification: s.qualification || "",
+      phone: s.phone || "",
+      address: { ...EMPTY_ADDRESS, ...(s.address || {}) },
+      joining_date: s.joining_date ? String(s.joining_date).split("T")[0] : "",
+      salary: s.salary != null ? String(s.salary) : "",
+      is_active: s.is_active !== false,
+    });
+    setSelected(null);
+    setShowForm(true);
+  };
+
+  const addressGiven = Object.entries(form.address || {}).some(
+    ([k, v]) => k !== "country" && v,
+  );
+  const addressValid =
+    !addressGiven ||
+    (form.address.line1 &&
+      form.address.city &&
+      form.address.state &&
+      PINCODE_RE.test(form.address.pincode || ""));
+
+  const canSave =
+    form.full_name &&
+    form.role &&
+    form.email &&
+    (editingId || form.password) && // password required only when creating
+    addressValid;
+
+  const save = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    try {
+      const payload = {
+        full_name: form.full_name,
+        role: form.role,
+        email: form.email,
+        subject_taught: form.subject_taught.length
+          ? form.subject_taught
+          : undefined,
+        qualification: form.qualification || undefined,
+        phone: form.phone || undefined,
+        joining_date: form.joining_date || undefined,
+        salary: form.salary !== "" ? Number(form.salary) : undefined,
+        is_active: form.is_active,
+        address: addressGiven ? form.address : undefined,
+      };
+      if (form.password) payload.password = form.password;
+
+      if (editingId) {
+        await userApi.update(editingId, payload);
+      } else {
+        await userApi.create(payload);
+      }
+      setShowForm(false);
+      setForm(EMPTY_FORM);
+      setEditingId(null);
+      setPage(1);
+      load();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Deletion always goes through the confirmation dialog below now -
+  // never call userApi.remove directly from a click handler.
+  const confirmDelete = async () => {
+    if (!confirmDeleteStaff) return;
+    setDeleting(true);
+    try {
+      await userApi.remove(confirmDeleteStaff._id);
+      setConfirmDeleteStaff(null);
+      setSelected(null);
+      load();
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -84,7 +235,7 @@ export default function BPStaff() {
           <p className="text-sm text-slate-500">{staff.length} members</p>
         </div>
         <Button
-          onClick={() => setShowForm(true)}
+          onClick={openAddForm}
           className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm gap-1.5"
         >
           <Plus className="w-4 h-4" /> Add Staff
@@ -97,16 +248,16 @@ export default function BPStaff() {
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 {[
-                  "Staff ID",
                   "Name",
                   "Role",
                   "Subject",
                   "Phone",
                   "Salary",
                   "Status",
+                  ...(canManageStaff ? [""] : []),
                 ].map((h) => (
                   <th
-                    key={h}
+                    key={h || "actions"}
                     className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide"
                   >
                     {h}
@@ -118,7 +269,7 @@ export default function BPStaff() {
               {loading && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={canManageStaff ? 7 : 6}
                     className="px-4 py-8 text-center text-slate-400"
                   >
                     Loading...
@@ -128,7 +279,7 @@ export default function BPStaff() {
               {!loading && staff.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={canManageStaff ? 7 : 6}
                     className="px-4 py-8 text-center text-slate-400"
                   >
                     No staff found
@@ -138,13 +289,10 @@ export default function BPStaff() {
               {!loading &&
                 paginated.map((s) => (
                   <tr
-                    key={s.id}
+                    key={s._id}
                     className="hover:bg-slate-50 cursor-pointer"
                     onClick={() => setSelected(s)}
                   >
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500">
-                      {s.staff_id}
-                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center">
@@ -159,15 +307,43 @@ export default function BPStaff() {
                       <StatusBadge value={s.role} />
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      {s.subject_taught || "—"}
+                      {formatSubjects(s.subject_taught)}
                     </td>
                     <td className="px-4 py-3 text-slate-600">{s.phone}</td>
                     <td className="px-4 py-3 font-medium text-slate-700">
                       ₹{Number(s.salary || 0).toLocaleString("en-IN")}
                     </td>
                     <td className="px-4 py-3">
-                      <StatusBadge value={s.status} />
+                      <StatusBadge
+                        value={s.is_active === false ? "Inactive" : "Active"}
+                      />
                     </td>
+                    {canManageStaff && (
+                      <td className="px-4 py-3">
+                        <div className="flex gap-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation(); // don't also open the detail dialog
+                              openEditForm(s);
+                            }}
+                            className="p-1.5 rounded hover:bg-indigo-50 text-indigo-500"
+                            aria-label="Edit"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConfirmDeleteStaff(s);
+                            }}
+                            className="p-1.5 rounded hover:bg-red-50 text-red-400"
+                            aria-label="Deactivate"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
             </tbody>
@@ -238,35 +414,76 @@ export default function BPStaff() {
           </DialogHeader>
           {selected && (
             <div className="space-y-4 mt-2">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center">
-                  <User className="w-6 h-6 text-purple-600" />
-                </div>
-                <div>
-                  <p className="font-semibold text-slate-800">
-                    {selected.full_name}
-                  </p>
-                  <div className="flex gap-2 mt-1">
-                    <StatusBadge value={selected.role} />
-                    <StatusBadge value={selected.status} />
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center">
+                    <User className="w-6 h-6 text-purple-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-800">
+                      {selected.full_name}
+                    </p>
+                    <div className="flex gap-2 mt-1">
+                      <StatusBadge value={selected.role} />
+                      <StatusBadge
+                        value={
+                          selected.is_active === false ? "Inactive" : "Active"
+                        }
+                      />
+                    </div>
                   </div>
                 </div>
+                {canManageStaff && (
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => openEditForm(selected)}
+                      className="text-slate-400 hover:text-indigo-600 p-1.5"
+                      aria-label="Edit"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteStaff(selected)}
+                      className="text-slate-400 hover:text-red-600 p-1.5"
+                      aria-label="Deactivate"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 {[
-                  ["Staff ID", selected.staff_id],
-                  ["Subject", selected.subject_taught || "—"],
+                  ["Email", selected.email],
+                  ["Subject", formatSubjects(selected.subject_taught)],
                   ["Qualification", selected.qualification],
                   ["Phone", selected.phone],
-                  ["Email", selected.email],
                   [
                     "Salary",
                     `₹${Number(selected.salary || 0).toLocaleString("en-IN")}`,
                   ],
-                  ["Joining Date", selected.joining_date],
-                  ["Address", selected.address],
+                  [
+                    "Joining Date",
+                    selected.joining_date
+                      ? String(selected.joining_date).split("T")[0]
+                      : "—",
+                  ],
+                  [
+                    "Address",
+                    selected.address
+                      ? [
+                          selected.address.line1,
+                          selected.address.line2,
+                          selected.address.city,
+                          selected.address.state,
+                          selected.address.pincode,
+                        ]
+                          .filter(Boolean)
+                          .join(", ")
+                      : "—",
+                  ],
                 ].map(([l, v]) => (
-                  <div key={l}>
+                  <div key={l} className={l === "Address" ? "col-span-2" : ""}>
                     <p className="text-xs text-slate-400">{l}</p>
                     <p className="font-medium text-slate-700">{v || "—"}</p>
                   </div>
@@ -277,67 +494,366 @@ export default function BPStaff() {
         </DialogContent>
       </Dialog>
 
-      {/* Add Staff Dialog */}
+      {/* Delete confirmation - deliberately not a bare window.confirm().
+          Note this is a SOFT delete (is_active: false) - the account can
+          still be reactivated later from Edit, so the copy below doesn't
+          claim it's permanent, just serious. */}
+      <Dialog
+        open={!!confirmDeleteStaff}
+        onOpenChange={() => setConfirmDeleteStaff(null)}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="w-5 h-5" />
+              Deactivate staff member?
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600 mt-1">
+            <span className="font-medium text-slate-800">
+              {confirmDeleteStaff?.full_name}
+            </span>{" "}
+            will be deactivated and lose access immediately - they won't be able
+            to log in. This can be reversed later from Edit if needed, but treat
+            it as permanent unless you're sure.
+          </p>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setConfirmDeleteStaff(null)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmDelete}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deleting ? "Deactivating..." : "Deactivate"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add / Edit Staff Dialog */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add Staff Member</DialogTitle>
+            <DialogTitle>
+              {editingId ? "Edit Staff Member" : "Add Staff Member"}
+            </DialogTitle>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-3 mt-2">
-            {[
-              { label: "Staff ID", key: "staff_id" },
-              { label: "Full Name", key: "full_name" },
-              { label: "Subject Taught", key: "subject_taught" },
-              { label: "Qualification", key: "qualification" },
-              { label: "Phone", key: "phone" },
-              { label: "Email", key: "email" },
-              { label: "Salary (₹)", key: "salary", type: "number" },
-              { label: "Joining Date", key: "joining_date", type: "date" },
-              { label: "Address", key: "address" },
-            ].map((f) => (
-              <div key={f.key}>
-                <label className="text-xs font-medium text-slate-600 mb-1 block">
-                  {f.label}
-                </label>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Full Name *
+              </label>
+              <Input
+                value={form.full_name}
+                onChange={(e) =>
+                  setForm({ ...form, full_name: e.target.value })
+                }
+                className="text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Role *
+              </label>
+              <Select
+                value={form.role}
+                onValueChange={(v) => setForm({ ...form, role: v })}
+              >
+                <SelectTrigger className="text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLE_OPTIONS.map((r) => (
+                    <SelectItem key={r.value} value={r.value}>
+                      {r.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Email *
+              </label>
+              <Input
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                className="text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                {editingId
+                  ? "New Password (leave blank to keep current)"
+                  : "Password *"}
+              </label>
+              <div className="flex gap-1.5">
                 <Input
-                  type={f.type || "text"}
-                  value={form[f.key]}
+                  type="text"
+                  value={form.password}
                   onChange={(e) =>
-                    setForm({ ...form, [f.key]: e.target.value })
+                    setForm({ ...form, password: e.target.value })
                   }
                   className="text-sm"
+                  placeholder={editingId ? "Unchanged" : ""}
                 />
-              </div>
-            ))}
-            {[
-              {
-                label: "Role",
-                key: "role",
-                opts: ["Teacher", "Admin", "Support"],
-              },
-              { label: "Status", key: "status", opts: ["Active", "Inactive"] },
-            ].map((f) => (
-              <div key={f.key}>
-                <label className="text-xs font-medium text-slate-600 mb-1 block">
-                  {f.label}
-                </label>
-                <Select
-                  value={form[f.key]}
-                  onValueChange={(v) => setForm({ ...form, [f.key]: v })}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 text-xs"
+                  onClick={() =>
+                    setForm({ ...form, password: randomPassword() })
+                  }
                 >
-                  <SelectTrigger className="text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {f.opts.map((o) => (
-                      <SelectItem key={o} value={o}>
-                        {o}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  Generate
+                </Button>
               </div>
-            ))}
+              {!editingId && form.password && (
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Share this password with the staff member - it won't be shown
+                  again.
+                </p>
+              )}
+            </div>
+            <div className="col-span-2">
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Subject(s) Taught
+              </label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-between text-sm font-normal"
+                  >
+                    {form.subject_taught.length
+                      ? form.subject_taught.join(", ")
+                      : "Select subjects"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64">
+                  <div className="space-y-2">
+                    {SUBJECTS.map((subject) => (
+                      <label
+                        key={subject}
+                        className="flex items-center gap-2 text-sm"
+                      >
+                        <Checkbox
+                          checked={form.subject_taught.includes(subject)}
+                          onCheckedChange={(checked) => {
+                            setForm((prev) => ({
+                              ...prev,
+                              subject_taught: checked
+                                ? [...prev.subject_taught, subject]
+                                : prev.subject_taught.filter(
+                                    (s) => s !== subject,
+                                  ),
+                            }));
+                          }}
+                        />
+                        {subject}
+                      </label>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Qualification
+              </label>
+              <Input
+                value={form.qualification}
+                onChange={(e) =>
+                  setForm({ ...form, qualification: e.target.value })
+                }
+                className="text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Phone
+              </label>
+              <Input
+                value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                className="text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Salary (₹)
+              </label>
+              <Input
+                type="number"
+                value={form.salary}
+                onChange={(e) => setForm({ ...form, salary: e.target.value })}
+                className="text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Joining Date
+              </label>
+              <Input
+                type="date"
+                value={form.joining_date}
+                onChange={(e) =>
+                  setForm({ ...form, joining_date: e.target.value })
+                }
+                className="text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Status
+              </label>
+              <Select
+                value={form.is_active ? "Active" : "Inactive"}
+                onValueChange={(v) =>
+                  setForm({ ...form, is_active: v === "Active" })
+                }
+              >
+                <SelectTrigger className="text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Active">Active</SelectItem>
+                  <SelectItem value="Inactive">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Address - a structured subdocument (see
+                models/_addressSchema.js), not a flat string. Entirely
+                optional; if any part is filled, line1/city/state/pincode
+                become required. */}
+            <div className="col-span-2">
+              <p className="text-xs font-semibold text-slate-700 mt-1 mb-1">
+                Address
+              </p>
+            </div>
+            <div className="col-span-2">
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Address Line 1
+              </label>
+              <Input
+                value={form.address.line1}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    address: { ...form.address, line1: e.target.value },
+                  })
+                }
+                className="text-sm"
+              />
+            </div>
+            <div className="col-span-2">
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Address Line 2
+              </label>
+              <Input
+                value={form.address.line2}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    address: { ...form.address, line2: e.target.value },
+                  })
+                }
+                className="text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                City
+              </label>
+              <Input
+                value={form.address.city}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    address: { ...form.address, city: e.target.value },
+                  })
+                }
+                className="text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                District
+              </label>
+              <Input
+                value={form.address.district}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    address: { ...form.address, district: e.target.value },
+                  })
+                }
+                className="text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                State
+              </label>
+              <Input
+                value={form.address.state}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    address: { ...form.address, state: e.target.value },
+                  })
+                }
+                className="text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Pincode
+              </label>
+              <Input
+                value={form.address.pincode}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    address: { ...form.address, pincode: e.target.value },
+                  })
+                }
+                placeholder="6-digit PIN"
+                className="text-sm"
+              />
+              {addressGiven &&
+                form.address.pincode &&
+                !PINCODE_RE.test(form.address.pincode) && (
+                  <p className="text-[11px] text-red-500 mt-1">
+                    Must be a valid 6-digit PIN code.
+                  </p>
+                )}
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Country
+              </label>
+              <Input
+                value={form.address.country}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    address: { ...form.address, country: e.target.value },
+                  })
+                }
+                className="text-sm"
+              />
+            </div>
           </div>
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="outline" onClick={() => setShowForm(false)}>
@@ -345,9 +861,10 @@ export default function BPStaff() {
             </Button>
             <Button
               onClick={save}
+              disabled={!canSave || saving}
               className="bg-emerald-600 hover:bg-emerald-700 text-white"
             >
-              Save
+              {saving ? "Saving..." : "Save"}
             </Button>
           </div>
         </DialogContent>

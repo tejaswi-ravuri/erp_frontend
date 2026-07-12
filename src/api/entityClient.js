@@ -131,6 +131,7 @@ const ENTITY_NAMES = [
   "Admission",
   "Student",
   "Staff",
+  "Branch",
   "Attendance",
   "Marks",
   "Exam",

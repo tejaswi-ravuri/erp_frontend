@@ -8,6 +8,7 @@ import {
   ClipboardCheck,
   BookOpen,
   CreditCard,
+  TrendingUp,
   TrendingDown,
   Wallet,
   GraduationCap,
@@ -22,19 +23,18 @@ import {
   LogOut,
   ChevronDown,
   ChevronRight,
+  BookCheck,
+  BriefcaseIcon,
 } from "lucide-react";
 
 const NAV_BY_ROLE = {
   finance: [
     { label: "Dashboard", icon: LayoutDashboard, path: "/" },
-    { label: "Fee Payments", icon: CreditCard, path: "/fees" },
     {
       label: "Student Fee Report",
       icon: FileText,
       path: "/student-fee-report",
     },
-    { label: "Bus Fee Report", icon: Navigation, path: "/bus-fee-report" },
-    { label: "Student Receipt", icon: Receipt, path: "/student-receipt" },
     { label: "Expenditure", icon: TrendingDown, path: "/expenditure" },
     { label: "Tracking Expenses", icon: BarChart2, path: "/tracking-expenses" },
     { label: "Accounts", icon: Wallet, path: "/accounts" },
@@ -42,6 +42,7 @@ const NAV_BY_ROLE = {
   teacher: [
     { label: "Dashboard", icon: LayoutDashboard, path: "/" },
     { label: "Students", icon: Users, path: "/students" },
+    { label: "Classes", icon: BookCheck, path: "/classes" },
     { label: "Attendance", icon: ClipboardCheck, path: "/attendance" },
     { label: "Marks", icon: BookOpen, path: "/marks" },
     { label: "Homework Manager", icon: Receipt, path: "/homework-manager" },
@@ -52,8 +53,8 @@ const NAV_BY_ROLE = {
   principal: [
     { label: "Dashboard", icon: LayoutDashboard, path: "/" },
     { label: "Staff", icon: Briefcase, path: "/staff" },
+    { label: "Classes", icon: BriefcaseIcon, path: "/classes" },
     { label: "Students", icon: Users, path: "/students" },
-    { label: "Admissions", icon: UserPlus, path: "/admissions" },
     { label: "Marks", icon: BookOpen, path: "/marks" },
     { label: "Report Cards", icon: GraduationCap, path: "/report-cards" },
     { label: "Analytics", icon: BarChart2, path: "/analytics" },
@@ -61,12 +62,14 @@ const NAV_BY_ROLE = {
   consultant: [
     { label: "Dashboard", icon: LayoutDashboard, path: "/" },
     { label: "Fee Payments", icon: CreditCard, path: "/fees" },
+    { label: "Admissions", icon: UserPlus, path: "/admissions" },
     {
       label: "Student Fee Report",
       icon: FileText,
       path: "/student-fee-report",
     },
-    { label: "Accounts", icon: Wallet, path: "/accounts" },
+    { label: "Income", icon: TrendingUp, path: "/income" },
+    { label: "Expenditure", icon: TrendingDown, path: "/expenditure" },
     { label: "Analytics", icon: BarChart2, path: "/analytics" },
   ],
 };

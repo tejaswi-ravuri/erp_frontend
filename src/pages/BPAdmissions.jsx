@@ -1,6 +1,17 @@
 import React, { useState, useEffect } from "react";
-import { entities } from "@/api/entityClient";
-import { Plus, Search, Pencil, Trash2, Eye, UserCheck } from "lucide-react";
+import { admissionApi, branchApi, classApi } from "@/api/api";
+import { useAuth } from "@/lib/AuthContext";
+import { toast } from "sonner";
+import {
+  Plus,
+  Search,
+  Pencil,
+  Trash2,
+  Eye,
+  UserCheck,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -45,29 +56,113 @@ const STAT_CARDS = [
   },
 ];
 
-const BRANCHES = ["Hyderabad", "Secunderabad", "Kukatpally", "Miyapur"];
-const CLASSES = [
-  "LKG",
-  "UKG",
-  "Class 1",
-  "Class 2",
-  "Class 3",
-  "Class 4",
-  "Class 5",
-  "Class 6",
-  "Class 7",
-  "Class 8",
-  "Class 9",
-  "Class 10",
-  "Class 11",
-  "Class 12",
-];
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
 const STATUSES = ["Enquiry", "Applied", "Under Review", "Admitted", "Rejected"];
-const YEARS = ["2023-24", "2024-25", "2025-26"];
+const YEARS = ["2023-24", "2024-25", "2025-26", "2026-27"];
+
+const apiErrorMessage = (err) =>
+  err?.response?.data?.message ||
+  err?.response?.data?.error ||
+  err?.message ||
+  "Something went wrong";
+
+const classLabel = (c) =>
+  ["LKG", "UKG"].includes(c?.grade) ? c.grade : `Class ${c?.grade}`;
+
+// Handles both a populated Class object ({_id, grade, ...}) and a bare
+// ObjectId string, since admissions may come back either way depending
+// on whether the list endpoint populates class_sought.
+const classId = (c) => (c && typeof c === "object" ? c._id : c);
+
+// Lightweight popup for just changing status, separate from the full
+// AdmissionForm. Setting status to "Admitted" here chains straight into
+// admissionApi.convert() (same call the UserCheck action below uses) so
+// the Student record gets created immediately - but only if one hasn't
+// already been created for this admission (student_id guard, mirrored
+// from handleConvert).
+function StatusEditModal({ admission, onClose, onSaved }) {
+  const [status, setStatus] = useState(admission.form_status);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      // NOTE: assumes admissionApi.update() accepts a partial payload
+      // (just form_status) without re-validating unrelated required
+      // fields. Flag if your backend's update route expects a full
+      // payload instead.
+      await admissionApi.update(admission._id, { form_status: status });
+      if (status === "Admitted" && !admission.student_id) {
+        await admissionApi.convert(admission._id);
+        toast.success(
+          `${admission.student_name} marked Admitted — Student record created`,
+        );
+      } else {
+        toast.success("Status updated");
+      }
+      onSaved();
+    } catch (err) {
+      toast.error(apiErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white w-full max-w-sm rounded-2xl shadow-2xl p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-base font-bold text-slate-800 mb-1">
+          Update Status
+        </h3>
+        <p className="text-sm text-slate-500 mb-4">{admission.student_name}</p>
+        <Select value={status} onValueChange={setStatus}>
+          <SelectTrigger className="h-9 text-sm w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {STATUSES.map((s) => (
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {status === "Admitted" && !admission.student_id && (
+          <p className="text-xs text-amber-600 mt-2">
+            Saving this will create the Student record for{" "}
+            {admission.student_name}.
+          </p>
+        )}
+        <div className="flex justify-end gap-2 mt-6">
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSave}
+            disabled={saving}
+            className="bg-indigo-600 hover:bg-indigo-700"
+          >
+            {saving ? "Saving..." : "Save"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function BPAdmissions() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [admissions, setAdmissions] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [classes, setClasses] = useState([]);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterBranch, setFilterBranch] = useState("all");
@@ -76,19 +171,54 @@ export default function BPAdmissions() {
   const [showForm, setShowForm] = useState(false);
   const [formMode, setFormMode] = useState("edit"); // 'edit' | 'view'
   const [selected, setSelected] = useState(null);
+  const [statusTarget, setStatusTarget] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  // "New Admission" is only actionable by accounts_manager - see
+  // rbac/permissions.js (Admission.create), which now includes
+  // ACCOUNTS_MANAGER alongside PRINCIPAL/ADMIN_OFFICER so this isn't just
+  // a hidden button with a 403 waiting behind it.
+  const canCreateAdmission = user?.role === "accounts_manager";
+
+  const resolvedBranchId =
+    typeof user?.branch === "object" ? user?.branch?._id : user?.branch;
+
+  const branchIdOf = (b) => b?._id || b;
+  const branchName = (b) =>
+    (b && typeof b === "object"
+      ? b.name
+      : branches.find((br) => br._id === b)?.name) || "—";
 
   const load = () =>
-    entities.Admission.list("-created_date").then(setAdmissions);
+    admissionApi
+      .list({ sort: "-created_date" })
+      .then(setAdmissions)
+      .catch((err) => toast.error(apiErrorMessage(err)));
+
   useEffect(() => {
     load();
+    branchApi
+      .list()
+      .then(setBranches)
+      .catch((err) => toast.error(apiErrorMessage(err)));
+    // Classes scoped to the current user's own branch, for the filter
+    // dropdown - matches class_sought being an ObjectId ref now rather
+    // than a plain "Class N" string.
+    if (resolvedBranchId) {
+      classApi
+        .list({ branch: resolvedBranchId })
+        .then((data) => setClasses(data?.data || data || []))
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleAdmitSuccess = (student) => {
     setShowForm(false);
     setSelected(null);
-    // Redirect to student receipt with student data
     navigate("/student-receipt", {
-      state: { studentId: student.id, autoLoad: true },
+      state: { studentId: student._id, autoLoad: true },
     });
   };
 
@@ -96,11 +226,14 @@ export default function BPAdmissions() {
     const q = search.toLowerCase();
     const matchSearch =
       (a.student_name || "").toLowerCase().includes(q) ||
-      (a.application_no || "").toLowerCase().includes(q);
+      (a.application_no || "").toLowerCase().includes(q) ||
+      (a.unique_id || "").toLowerCase().includes(q);
     const matchStatus =
       filterStatus === "all" || a.form_status === filterStatus;
-    const matchBranch = filterBranch === "all" || a.branch === filterBranch;
-    const matchClass = filterClass === "all" || a.class_sought === filterClass;
+    const matchBranch =
+      filterBranch === "all" || branchIdOf(a.branch) === filterBranch;
+    const matchClass =
+      filterClass === "all" || classId(a.class_sought) === filterClass;
     const matchYear = filterYear === "all" || a.academic_year === filterYear;
     return matchSearch && matchStatus && matchBranch && matchClass && matchYear;
   });
@@ -109,6 +242,19 @@ export default function BPAdmissions() {
     acc[a.form_status] = (acc[a.form_status] || 0) + 1;
     return acc;
   }, {});
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, filterStatus, filterBranch, filterClass, filterYear]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [totalPages, page]);
+
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const rangeStart = filtered.length === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, filtered.length);
 
   const openNew = () => {
     setSelected(null);
@@ -137,30 +283,40 @@ export default function BPAdmissions() {
   const handleDelete = async (a) => {
     const st = a.form_status;
     if (st !== "Enquiry" && st !== "Rejected") return;
-    if (confirm(`Delete application for ${a.student_name}?`)) {
-      await entities.Admission.delete(a.id);
+    if (!confirm(`Delete application for ${a.student_name}?`)) return;
+    try {
+      await admissionApi.remove(a._id);
+      toast.success("Application deleted");
       load();
+    } catch (err) {
+      toast.error(apiErrorMessage(err));
     }
   };
 
+  // Class resolution, roll_no generation, admission_no generation, and
+  // Student creation all happen server-side now (see
+  // controllers/admissionController.js convert()) - this just calls it.
   const handleConvert = async (a) => {
     if (a.form_status !== "Admitted") return;
+    if (a.student_id) {
+      toast.info(
+        "This application has already been converted to a student record.",
+      );
+      return;
+    }
     if (!confirm(`Create a Student record for ${a.student_name}?`)) return;
-    await entities.Student.create({
-      full_name: a.student_name,
-      admission_no: a.admission_no || a.application_no,
-      class: (a.class_sought || "").replace("Class ", ""),
-      gender: a.gender || "",
-      dob: a.dob || "",
-      blood_group: a.blood_group || "",
-      parent_name: a.father_name || "",
-      parent_phone: a.father_mobile || "",
-      parent_email: a.father_email || "",
-      address: a.communication_address || "",
-      joining_date: new Date().toISOString().split("T")[0],
-      status: "Active",
-    });
-    alert(`Student record created for ${a.student_name}`);
+    try {
+      await admissionApi.convert(a._id);
+      toast.success(`Student record created for ${a.student_name}`);
+      load();
+    } catch (err) {
+      toast.error(apiErrorMessage(err));
+    }
+  };
+
+  const handleStatusSaved = () => {
+    setStatusTarget(null);
+    load();
   };
 
   return (
@@ -173,6 +329,7 @@ export default function BPAdmissions() {
             {admissions.length} total applications
           </p>
         </div>
+        {/* {canCreateAdmission && ( */}
         <Button
           onClick={openNew}
           className="bg-indigo-600 hover:bg-indigo-700 gap-1"
@@ -180,6 +337,7 @@ export default function BPAdmissions() {
           <Plus className="w-4 h-4" />
           New Admission
         </Button>
+        {/* )} */}
       </div>
 
       {/* Stats */}
@@ -205,7 +363,7 @@ export default function BPAdmissions() {
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <Input
-            placeholder="Search name or app no..."
+            placeholder="Search name, app no, or unique ID..."
             className="pl-9"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -230,9 +388,9 @@ export default function BPAdmissions() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Branches</SelectItem>
-            {BRANCHES.map((b) => (
-              <SelectItem key={b} value={b}>
-                {b}
+            {branches.map((b) => (
+              <SelectItem key={b._id} value={b._id}>
+                {b.name}
               </SelectItem>
             ))}
           </SelectContent>
@@ -243,9 +401,9 @@ export default function BPAdmissions() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Classes</SelectItem>
-            {CLASSES.map((c) => (
-              <SelectItem key={c} value={c}>
-                {c}
+            {classes.map((c) => (
+              <SelectItem key={c._id} value={c._id}>
+                {classLabel(c)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -274,7 +432,6 @@ export default function BPAdmissions() {
                 {[
                   "App No.",
                   "Student Name",
-                  "Class",
                   "Branch",
                   "Mobile",
                   "Acad. Year",
@@ -294,13 +451,17 @@ export default function BPAdmissions() {
             <tbody className="divide-y divide-slate-100">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="text-center py-14 text-slate-400">
+                  <td colSpan={8} className="text-center py-14 text-slate-400">
                     No records found
                   </td>
                 </tr>
               ) : (
-                filtered.map((a) => (
-                  <tr key={a.id} className="hover:bg-slate-50">
+                paginated.map((a) => (
+                  <tr
+                    key={a._id}
+                    className="hover:bg-slate-50 cursor-pointer"
+                    onClick={() => openView(a)}
+                  >
                     <td className="px-4 py-3 text-indigo-600 font-semibold">
                       {a.application_no || "-"}
                     </td>
@@ -308,10 +469,7 @@ export default function BPAdmissions() {
                       {a.student_name || "-"}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      {a.class_sought || "-"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {a.branch || "-"}
+                      {branchName(a.branch)}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       {a.father_mobile || "-"}
@@ -319,19 +477,27 @@ export default function BPAdmissions() {
                     <td className="px-4 py-3 text-slate-500">
                       {a.academic_year || "-"}
                     </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATUS_COLORS[a.form_status] || "bg-slate-100 text-slate-600"}`}
+                    <td
+                      className="px-4 py-3"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={() => setStatusTarget(a)}
+                        title="Click to change status"
+                        className={`px-2.5 py-0.5 rounded-full text-xs font-semibold hover:ring-2 hover:ring-offset-1 hover:ring-indigo-300 transition ${STATUS_COLORS[a.form_status] || "bg-slate-100 text-slate-600"}`}
                       >
                         {a.form_status || "-"}
-                      </span>
+                      </button>
                     </td>
                     <td className="px-4 py-3 text-slate-400 text-xs whitespace-nowrap">
                       {a.created_date
                         ? format(new Date(a.created_date), "dd MMM yyyy")
                         : "-"}
                     </td>
-                    <td className="px-4 py-3">
+                    <td
+                      className="px-4 py-3"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => openView(a)}
@@ -347,7 +513,7 @@ export default function BPAdmissions() {
                         >
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
-                        {a.form_status === "Admitted" && (
+                        {a.form_status === "Admitted" && !a.student_id && (
                           <button
                             onClick={() => handleConvert(a)}
                             title="Convert to Student"
@@ -374,6 +540,61 @@ export default function BPAdmissions() {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-t border-slate-100">
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span>
+              {filtered.length === 0
+                ? "0 results"
+                : `Showing ${rangeStart}–${rangeEnd} of ${filtered.length}`}
+            </span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(v) => {
+                setPageSize(Number(v));
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-28 h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((n) => (
+                  <SelectItem key={n} value={String(n)}>
+                    {n} / page
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              Previous
+            </Button>
+            <span className="text-xs text-slate-500 px-1">
+              Page {page} of {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next
+              <ChevronRight className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </div>
       </div>
 
       {showForm && (
@@ -383,6 +604,14 @@ export default function BPAdmissions() {
           onClose={closeForm}
           onSaved={handleSaved}
           onAdmit={handleAdmitSuccess}
+        />
+      )}
+
+      {statusTarget && (
+        <StatusEditModal
+          admission={statusTarget}
+          onClose={() => setStatusTarget(null)}
+          onSaved={handleStatusSaved}
         />
       )}
     </div>
