@@ -424,7 +424,7 @@ export const incomeApi = {
 export const expenditureApi = {
   async list(params = {}) {
     const { data } = await http.get("/api/expenditure", { params });
-    return data?.data ?? data;
+    return data;
   },
   /** approved_by is set server-side from the logged-in user - don't send it. */
   async create(body) {
@@ -435,8 +435,17 @@ export const expenditureApi = {
     const { data } = await http.put(`/api/expenditure/${id}`, body);
     return data?.data ?? data;
   },
-  async remove(id) {
-    const { data } = await http.delete(`/api/expenditure/${id}`);
+  /** Flags the record for deletion - it isn't removed until an Admin Officer approves. */
+  async requestDelete(id) {
+    const { data } = await http.post(`/api/expenditure/${id}/request-delete`);
+    return data?.data ?? data;
+  },
+  async approveDelete(id) {
+    const { data } = await http.post(`/api/expenditure/${id}/approve-delete`);
+    return data?.data ?? data;
+  },
+  async rejectDelete(id) {
+    const { data } = await http.post(`/api/expenditure/${id}/reject-delete`);
     return data?.data ?? data;
   },
 };

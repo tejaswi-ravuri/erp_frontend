@@ -63,6 +63,8 @@ const NAV_BY_ROLE = {
     { label: "Dashboard", icon: LayoutDashboard, path: "/" },
     { label: "Fee Payments", icon: CreditCard, path: "/fees" },
     { label: "Admissions", icon: UserPlus, path: "/admissions" },
+    { label: "Students", icon: Users, path: "/students" },
+
     {
       label: "Student Fee Report",
       icon: FileText,
