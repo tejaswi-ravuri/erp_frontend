@@ -1,5 +1,7 @@
-import React, { useState } from "react";
-import { entities } from "@/api/entityClient";
+import React, { useState, useEffect, useMemo } from "react";
+import { feeApi, classApi } from "@/api/api";
+import { toast } from "sonner";
+import { Search, UserPlus, CheckCircle2, X, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -9,360 +11,453 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { X } from "lucide-react";
 
-const EMPTY = {
-  sno: "",
-  student_id: "",
-  student_name: "",
-  father_name: "",
-  mob_number: "",
-  class: "",
-  student_type: "",
+const apiErrorMessage = (err) =>
+  err?.response?.data?.message ||
+  err?.response?.data?.error ||
+  err?.message ||
+  "Something went wrong";
+
+const emptyFeeFields = {
+  student_type: "New",
   old_fee: 0,
-  adm_gross_fee: "",
+  adm_gross_fee: 0,
   adm_concession: 0,
-  paid_adm_fee: "",
-  gross_term_fee: "",
+  paid_adm_fee: 0,
+  gross_term_fee: 0,
   term_concession: 0,
-  paid_term_fee: "",
+  paid_term_fee: 0,
   remarks: "",
   status: "Active",
 };
 
-function Field({ label, required, children }) {
+const feeFieldsFromRecord = (r) => ({
+  student_type: r.student_type,
+  old_fee: r.old_fee || 0,
+  adm_gross_fee: r.adm_gross_fee || 0,
+  adm_concession: r.adm_concession || 0,
+  paid_adm_fee: r.paid_adm_fee || 0,
+  gross_term_fee: r.gross_term_fee || 0,
+  term_concession: r.term_concession || 0,
+  paid_term_fee: r.paid_term_fee || 0,
+  remarks: r.remarks || "",
+  status: r.status || "Active",
+});
+
+// A number input that behaves the way people actually expect:
+// - clicking/tabbing in selects the whole value, so typing "5" over a "0"
+//   gives you "5", not "05" (the classic controlled-input-starting-at-zero
+//   bug where the cursor lands before the digit instead of after it)
+// - only digits can be typed at all (regex strips everything else as you go,
+//   rather than validating after the fact)
+// - blur normalizes the display (drops any leading zeros, empty -> "0")
+function NumberInput({ value, onChange, disabled, className = "", ...props }) {
+  const [text, setText] = useState(String(value ?? 0));
+
+  useEffect(() => {
+    setText(String(value ?? 0));
+  }, [value]);
+
   return (
-    <div>
-      <label className="block text-xs font-medium text-slate-600 mb-1">
-        {label}
-        {required && <span className="text-red-500 ml-0.5">*</span>}
-      </label>
-      {children}
-    </div>
+    <Input
+      type="text"
+      inputMode="numeric"
+      disabled={disabled}
+      className={className}
+      value={text}
+      onFocus={(e) => e.target.select()}
+      onChange={(e) => {
+        const digitsOnly = e.target.value.replace(/[^0-9]/g, "");
+        setText(digitsOnly);
+        onChange(digitsOnly === "" ? 0 : Number(digitsOnly));
+      }}
+      onBlur={() => {
+        const n = text === "" ? 0 : Number(text);
+        setText(String(n));
+      }}
+      {...props}
+    />
   );
 }
 
-function ReadOnlyField({ label, value, color }) {
-  const colors = {
-    red: "text-red-600",
-    green: "text-green-600",
-    default: "text-slate-800",
-  };
-  return (
-    <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-      <p className="text-xs text-slate-500 mb-0.5">{label}</p>
-      <p className={`text-sm font-bold ${colors[color] || colors.default}`}>
-        ₹{(value || 0).toLocaleString("en-IN")}
-      </p>
-    </div>
-  );
-}
+// `record` = an existing StudentFeeReport, passed in when opened via the
+// page's edit (pencil) action - student/class are already fixed and locked.
+export default function StudentFeeReportForm({ record, onClose, onSaved }) {
+  const isEditingDirectly = !!record;
 
-export default function StudentFeeReportForm({
-  record,
-  onClose,
-  onSaved,
-  nextSno,
-}) {
-  const [form, setForm] = useState(
-    record ? { ...EMPTY, ...record } : { ...EMPTY, sno: nextSno },
+  const [classes, setClasses] = useState([]);
+  const [selectedClass, setSelectedClass] = useState(
+    record && typeof record.class === "object"
+      ? record.class._id
+      : record?.class || "",
+  );
+
+  const [students, setStudents] = useState([]);
+  const [studentSearch, setStudentSearch] = useState("");
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+
+  const [reportId, setReportId] = useState(record?._id || null);
+  const [fields, setFields] = useState(
+    record ? feeFieldsFromRecord(record) : emptyFeeFields,
   );
   const [saving, setSaving] = useState(false);
-  const [lookupLoading, setLookupLoading] = useState(false);
 
-  const set = (k, v) => setForm((prev) => ({ ...prev, [k]: v }));
-
-  // Admission Fee derived
-  const admGross = parseFloat(form.adm_gross_fee) || 0;
-  const admConcession = parseFloat(form.adm_concession) || 0;
-  const netAdmFee = admGross - admConcession;
-  const paidAdmFee = parseFloat(form.paid_adm_fee) || 0;
-  const balanceAdmFee = netAdmFee - paidAdmFee;
-
-  // Term Fee derived
-  const oldFee =
-    form.student_type === "New" ? 0 : parseFloat(form.old_fee) || 0;
-  const grossTermFee = parseFloat(form.gross_term_fee) || 0;
-  const termConcession = parseFloat(form.term_concession) || 0;
-  const netTermFee = oldFee + grossTermFee - termConcession;
-  const paidTermFee = parseFloat(form.paid_term_fee) || 0;
-  const balanceTermFee = netTermFee - paidTermFee;
-
-  const handleIdLookup = async (id) => {
-    set("student_id", id);
-    if (!id || id.length < 5) return;
-    setLookupLoading(true);
-    try {
-      const students = await entities.Student.filter({
-        admission_no: id,
-      });
-      if (students.length > 0) {
-        const s = students[0];
-        setForm((prev) => ({
-          ...prev,
-          student_id: id,
-          student_name: s.full_name || prev.student_name,
-          father_name: s.parent_name || prev.father_name,
-          mob_number: s.parent_phone || prev.mob_number,
-          class: s.class || prev.class,
-        }));
+  // A student is "locked in" once picked (or when editing an existing
+  // record directly) - the class/student pickers disable at that point so
+  // they can't be changed out from under the fee data you're entering.
+  const studentLocked = isEditingDirectly || !!selectedStudent;
+  const activeStudent = isEditingDirectly
+    ? {
+        name: record.student_name,
+        father_name: record.father_name,
+        mobile: record.mob_number,
       }
-    } catch (e) {
-      /* ignore */
+    : selectedStudent;
+
+  useEffect(() => {
+    classApi
+      .list()
+      .then((data) => setClasses(data.data))
+      .catch((err) => toast.error(apiErrorMessage(err)));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedClass || studentLocked) return;
+    setLoadingStudents(true);
+    feeApi
+      .listEligibleStudents({ class: selectedClass })
+      .then(setStudents)
+      .catch((err) => toast.error(apiErrorMessage(err)))
+      .finally(() => setLoadingStudents(false));
+  }, [selectedClass, studentLocked]);
+
+  const filteredStudents = useMemo(() => {
+    const q = studentSearch.toLowerCase();
+    if (!q) return students;
+    return students.filter((s) => (s.name || "").toLowerCase().includes(q));
+  }, [students, studentSearch]);
+
+  const pickStudent = (s) => {
+    setSelectedStudent(s);
+    if (s.has_report && s.existing_report) {
+      // Already has a fee record - open it for editing rather than
+      // creating a duplicate report for the same student.
+      setReportId(s.existing_report._id);
+      setFields(feeFieldsFromRecord(s.existing_report));
+      toast.info(`${s.name} already has a fee record — editing it.`);
+    } else {
+      setReportId(null);
+      setFields({ ...emptyFeeFields });
     }
-    setLookupLoading(false);
   };
 
-  const handleSave = async () => {
-    if (
-      !form.student_name ||
-      !form.student_id ||
-      !form.father_name ||
-      !form.mob_number ||
-      !form.class ||
-      !form.student_type
-    ) {
-      alert("Please fill all required fields.");
+  const handleChangeStudent = () => {
+    setSelectedStudent(null);
+    setReportId(null);
+    setFields({ ...emptyFeeFields });
+    setStudentSearch("");
+  };
+
+  const setField = (k, v) => setFields((f) => ({ ...f, [k]: v }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!studentLocked) {
+      toast.error("Select a class and student first.");
       return;
     }
     setSaving(true);
-    const payload = {
-      ...form,
-      old_fee: form.student_type === "New" ? 0 : parseFloat(form.old_fee) || 0,
-      adm_gross_fee: admGross,
-      adm_concession: admConcession,
-      net_adm_fee: netAdmFee,
-      paid_adm_fee: paidAdmFee,
-      balance_adm_fee: balanceAdmFee,
-      gross_term_fee: grossTermFee,
-      term_concession: termConcession,
-      net_term_fee: netTermFee,
-      paid_term_fee: paidTermFee,
-      balance_term_fee: balanceTermFee,
-      sno: parseFloat(form.sno) || nextSno,
-      status: form.status || "Active",
-    };
-    if (record?.id) await entities.StudentFeeReport.update(record.id, payload);
-    else await entities.StudentFeeReport.create(payload);
-    setSaving(false);
-    onSaved();
+    try {
+      if (reportId) {
+        await feeApi.updateReport(reportId, fields);
+        toast.success("Fee record updated.");
+      } else {
+        await feeApi.createReport({
+          student_id: selectedStudent.student_id,
+          student_name: selectedStudent.name,
+          father_name: selectedStudent.father_name,
+          mob_number: selectedStudent.mobile,
+          class: selectedClass,
+          ...fields,
+        });
+        toast.success("Fee record created.");
+      }
+      onSaved();
+    } catch (err) {
+      toast.error(apiErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const numInp = (k, placeholder = "0") => (
-    <Input
-      type="number"
-      value={form[k] ?? ""}
-      onChange={(e) => set(k, e.target.value)}
-      placeholder={placeholder}
-      className="h-8 text-sm"
-    />
-  );
+  const feeFieldsDisabled = !studentLocked;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 overflow-y-auto">
-      <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl my-auto">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <h2 className="text-base font-bold text-slate-800">
-            {record ? "Edit Student Fee Record" : "Add Student Fee Record"}
-          </h2>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <h3 className="font-semibold text-slate-800">
+            {reportId ? "Edit Fee Record" : "Add Student Fee Record"}
+          </h3>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"
+            className="text-slate-400 hover:text-slate-600"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
-          {/* Section 1 — Student Info */}
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
           <div>
-            <div className="bg-blue-600 text-white px-4 py-2 rounded-lg mb-4">
-              <p className="text-xs font-bold uppercase tracking-wide">
-                Section 1 — Student Information
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="S.No">
-                <Input
-                  value={form.sno ?? ""}
-                  onChange={(e) => set("sno", e.target.value)}
-                  placeholder="Auto"
-                  className="h-8 text-sm"
-                />
-              </Field>
-              <Field label="Student ID" required>
-                <div className="relative">
-                  <Input
-                    value={form.student_id || ""}
-                    onChange={(e) => handleIdLookup(e.target.value)}
-                    placeholder="STU-001"
-                    className="h-8 text-sm"
-                  />
-                  {lookupLoading && (
-                    <span className="absolute right-2 top-1.5 text-xs text-indigo-500">
-                      Looking up...
-                    </span>
-                  )}
-                </div>
-              </Field>
-              <Field label="Student Name" required>
-                <Input
-                  value={form.student_name || ""}
-                  onChange={(e) => set("student_name", e.target.value)}
-                  className="h-8 text-sm"
-                />
-              </Field>
-              <Field label="Father Name" required>
-                <Input
-                  value={form.father_name || ""}
-                  onChange={(e) => set("father_name", e.target.value)}
-                  className="h-8 text-sm"
-                />
-              </Field>
-              <Field label="Mobile Number" required>
-                <Input
-                  value={form.mob_number || ""}
-                  onChange={(e) =>
-                    set(
-                      "mob_number",
-                      e.target.value.replace(/\D/g, "").slice(0, 10),
-                    )
-                  }
-                  placeholder="10-digit mobile"
-                  className="h-8 text-sm"
-                />
-              </Field>
-              <Field label="Class" required>
-                <Input
-                  value={form.class || ""}
-                  onChange={(e) => set("class", e.target.value)}
-                  placeholder="e.g. 8A, 9B"
-                  className="h-8 text-sm"
-                />
-              </Field>
-              <Field label="Student Type" required>
-                <Select
-                  value={form.student_type || ""}
-                  onValueChange={(v) => set("student_type", v)}
-                >
-                  <SelectTrigger className="h-8 text-sm">
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Existing">Existing</SelectItem>
-                    <SelectItem value="New">New</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Status">
-                <Select
-                  value={form.status || "Active"}
-                  onValueChange={(v) => set("status", v)}
-                >
-                  <SelectTrigger className="h-8 text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Active">Active</SelectItem>
-                    <SelectItem value="Inactive">Inactive</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-            </div>
+            <label className="text-xs font-medium text-slate-500">Class</label>
+            <Select
+              value={selectedClass}
+              disabled={studentLocked}
+              onValueChange={(v) => setSelectedClass(v)}
+            >
+              <SelectTrigger className="h-10 mt-1">
+                <SelectValue placeholder="Select class" />
+              </SelectTrigger>
+              <SelectContent>
+                {classes.map((c) => (
+                  <SelectItem key={c._id} value={c._id}>
+                    Class {c.grade}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
-          {/* Section 2 — Admission Fee */}
-          <div>
-            <div className="bg-green-700 text-white px-4 py-2 rounded-lg mb-4">
-              <p className="text-xs font-bold uppercase tracking-wide">
-                Section 2 — Admission Fee
-              </p>
+          {selectedClass && !studentLocked && (
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-slate-500">
+                Student
+              </label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Input
+                  placeholder="Search student by name..."
+                  className="pl-9 h-9"
+                  value={studentSearch}
+                  onChange={(e) => setStudentSearch(e.target.value)}
+                />
+              </div>
+              <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-56 overflow-y-auto">
+                {loadingStudents ? (
+                  <p className="text-center text-sm text-slate-400 py-6">
+                    Loading students...
+                  </p>
+                ) : filteredStudents.length === 0 ? (
+                  <p className="text-center text-sm text-slate-400 py-6">
+                    No students found in this class.
+                  </p>
+                ) : (
+                  filteredStudents.map((s) => (
+                    <button
+                      type="button"
+                      key={s.student_id}
+                      onClick={() => pickStudent(s)}
+                      className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-slate-50"
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-slate-800">
+                          {s.name}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {s.father_name} · {s.mobile}
+                        </p>
+                      </div>
+                      {s.has_report ? (
+                        <span className="flex items-center gap-1 text-xs text-emerald-600 font-medium shrink-0">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Recorded
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-xs text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded-full shrink-0">
+                          <UserPlus className="w-3 h-3" /> New
+                        </span>
+                      )}
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Adm Gross Fee ₹" required>
-                {numInp("adm_gross_fee")}
-              </Field>
-              <Field label="Adm Concession ₹">
-                {numInp("adm_concession", "0")}
-              </Field>
-              <ReadOnlyField
-                label="Net Adm Fee (Gross − Concession)"
-                value={netAdmFee}
-                color={netAdmFee < 0 ? "red" : "default"}
-              />
-              <Field label="Paid Adm Fee ₹" required>
-                {numInp("paid_adm_fee")}
-              </Field>
-              <ReadOnlyField
-                label="Balance Adm Fee (Net − Paid)"
-                value={balanceAdmFee}
-                color={balanceAdmFee > 0 ? "red" : "green"}
-              />
-            </div>
-          </div>
+          )}
 
-          {/* Section 3 — Term Fee */}
-          <div>
-            <div className="bg-amber-700 text-white px-4 py-2 rounded-lg mb-4">
-              <p className="text-xs font-bold uppercase tracking-wide">
-                Section 3 — Term Fee 2026-27
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              {form.student_type === "Existing" && (
-                <Field label="Old Fee ₹">{numInp("old_fee")}</Field>
+          {studentLocked && activeStudent && (
+            <div className="bg-slate-50 rounded-lg p-3 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-800">
+                  {activeStudent.name}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {activeStudent.father_name} · {activeStudent.mobile}
+                </p>
+              </div>
+              {!isEditingDirectly && (
+                <button
+                  type="button"
+                  onClick={handleChangeStudent}
+                  className="flex items-center gap-1 text-xs text-indigo-600 hover:underline shrink-0"
+                >
+                  <Pencil className="w-3 h-3" /> Change
+                </button>
               )}
-              <Field label="Gross Term Fee 26-27 ₹" required>
-                {numInp("gross_term_fee")}
-              </Field>
-              <Field label="Term Concession ₹">
-                {numInp("term_concession", "0")}
-              </Field>
-              <ReadOnlyField
-                label="Net Term Fee (Old + Gross − Concession)"
-                value={netTermFee}
-                color={netTermFee < 0 ? "red" : "default"}
+            </div>
+          )}
+
+          <div
+            className={`grid grid-cols-2 gap-3 ${feeFieldsDisabled ? "opacity-60" : ""}`}
+          >
+            <div className="col-span-2">
+              <label className="text-xs font-medium text-slate-500">
+                Student Type
+              </label>
+              <Select
+                value={fields.student_type}
+                disabled={feeFieldsDisabled}
+                onValueChange={(v) => setField("student_type", v)}
+              >
+                <SelectTrigger className="h-9 mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="New">New</SelectItem>
+                  <SelectItem value="Existing">Existing</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="col-span-2">
+              <label className="text-xs font-medium text-slate-500">
+                Old Fee (Previous Due)
+              </label>
+              <NumberInput
+                className="h-9 mt-1"
+                disabled={feeFieldsDisabled}
+                value={fields.old_fee}
+                onChange={(n) => setField("old_fee", n)}
               />
-              <Field label="Paid Term Fee ₹" required>
-                {numInp("paid_term_fee")}
-              </Field>
-              <ReadOnlyField
-                label="Balance Fee (Net − Paid)"
-                value={balanceTermFee}
-                color={balanceTermFee > 0 ? "red" : "green"}
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-slate-500">
+                Admission Gross Fee
+              </label>
+              <NumberInput
+                className="h-9 mt-1"
+                disabled={feeFieldsDisabled}
+                value={fields.adm_gross_fee}
+                onChange={(n) => setField("adm_gross_fee", n)}
               />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-500">
+                Admission Concession
+              </label>
+              <NumberInput
+                className="h-9 mt-1"
+                disabled={feeFieldsDisabled}
+                value={fields.adm_concession}
+                onChange={(n) => setField("adm_concession", n)}
+              />
+            </div>
+            <div className="col-span-2">
+              <label className="text-xs font-medium text-slate-500">
+                Paid Admission Fee
+              </label>
+              <NumberInput
+                className="h-9 mt-1"
+                disabled={feeFieldsDisabled}
+                value={fields.paid_adm_fee}
+                onChange={(n) => setField("paid_adm_fee", n)}
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-slate-500">
+                Gross Term Fee
+              </label>
+              <NumberInput
+                className="h-9 mt-1"
+                disabled={feeFieldsDisabled}
+                value={fields.gross_term_fee}
+                onChange={(n) => setField("gross_term_fee", n)}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-500">
+                Term Concession
+              </label>
+              <NumberInput
+                className="h-9 mt-1"
+                disabled={feeFieldsDisabled}
+                value={fields.term_concession}
+                onChange={(n) => setField("term_concession", n)}
+              />
+            </div>
+            <div className="col-span-2">
+              <label className="text-xs font-medium text-slate-500">
+                Paid Term Fee
+              </label>
+              <NumberInput
+                className="h-9 mt-1"
+                disabled={feeFieldsDisabled}
+                value={fields.paid_term_fee}
+                onChange={(n) => setField("paid_term_fee", n)}
+              />
+            </div>
+
+            <div className="col-span-2">
+              <label className="text-xs font-medium text-slate-500">
+                Remarks
+              </label>
+              <Input
+                maxLength={100}
+                className="h-9 mt-1"
+                disabled={feeFieldsDisabled}
+                value={fields.remarks}
+                onChange={(e) => setField("remarks", e.target.value)}
+              />
+            </div>
+
+            <div className="col-span-2">
+              <label className="text-xs font-medium text-slate-500">
+                Status
+              </label>
+              <Select
+                value={fields.status}
+                disabled={feeFieldsDisabled}
+                onValueChange={(v) => setField("status", v)}
+              >
+                <SelectTrigger className="h-9 mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Active">Active</SelectItem>
+                  <SelectItem value="Inactive">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
-          {/* Remarks */}
-          <div>
-            <Field label="Remarks (optional, max 100 chars)">
-              <textarea
-                value={form.remarks || ""}
-                onChange={(e) => set("remarks", e.target.value.slice(0, 100))}
-                rows={2}
-                placeholder="e.g. T2 pending, Merit concession..."
-                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              />
-              <p className="text-xs text-slate-400 text-right mt-0.5">
-                {(form.remarks || "").length}/100
-              </p>
-            </Field>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={saving || feeFieldsDisabled}
+              className="bg-indigo-600 hover:bg-indigo-700"
+            >
+              {saving
+                ? "Saving..."
+                : reportId
+                  ? "Update Record"
+                  : "Save Record"}
+            </Button>
           </div>
-        </div>
-
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-2xl">
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSave}
-            disabled={saving}
-            className="bg-indigo-600 hover:bg-indigo-700 min-w-[80px]"
-          >
-            {saving ? "Saving..." : "Save"}
-          </Button>
-        </div>
+        </form>
       </div>
     </div>
   );

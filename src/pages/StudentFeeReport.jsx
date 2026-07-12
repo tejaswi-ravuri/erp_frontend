@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
-import { entities } from "@/api/entityClient";
+import React, { useState, useEffect, useMemo } from "react";
+import { feeApi, classApi } from "@/api/api";
+import { toast } from "sonner";
 import {
   Plus,
   Pencil,
@@ -24,6 +25,24 @@ import StudentFeeReportForm from "@/components/fees/StudentFeeReportForm";
 const fmt = (n) => `₹${(n || 0).toLocaleString("en-IN")}`;
 const fmtNum = (n) => (n || 0).toLocaleString("en-IN");
 
+// StudentFeeReport.class is a real Class reference now (ObjectId), not a
+// plain string - see models/StudentFeeReport.js. This resolves either a
+// populated {_id, grade} object (the list endpoint populates it) or a
+// bare ObjectId string (fallback via classesById), so this page works
+// either way.
+const classIdOf = (c) => (c && typeof c === "object" ? c._id : c);
+const classLabelOf = (c, classesById) => {
+  if (c && typeof c === "object" && c.grade) return `Class ${c.grade}`;
+  const found = classesById[c];
+  return found ? `Class ${found.grade}` : "—";
+};
+
+const apiErrorMessage = (err) =>
+  err?.response?.data?.message ||
+  err?.response?.data?.error ||
+  err?.message ||
+  "Something went wrong";
+
 function SummaryCard({ label, value, color = "indigo" }) {
   const colors = {
     indigo: "bg-indigo-50 border-indigo-200 text-indigo-700",
@@ -41,6 +60,7 @@ function SummaryCard({ label, value, color = "indigo" }) {
 
 export default function StudentFeeReportPage() {
   const [records, setRecords] = useState([]);
+  const [classes, setClasses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterClass, setFilterClass] = useState("all");
@@ -51,116 +71,161 @@ export default function StudentFeeReportPage() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
 
-  const load = async () => {
-    setLoading(true);
-    const data = await entities.StudentFeeReport.list("sno");
-    setRecords(data);
-    setLoading(false);
+  const classesById = useMemo(
+    () => Object.fromEntries(classes.map((c) => [c._id, c])),
+    [classes],
+  );
+
+  // `background: true` is used by the 10s poll below - it refreshes
+  // `records` in place without touching `loading`, so a silent sync
+  // never blanks the table out to a "Loading..." row. Only the very
+  // first mount (background=false, the default) shows the spinner.
+  const load = ({ background = false } = {}) => {
+    if (!background) setLoading(true);
+    feeApi
+      .listReports({ sort: "sno" })
+      .then((data) => {
+        setRecords(data);
+      })
+      .catch((err) => toast.error(apiErrorMessage(err)))
+      .finally(() => {
+        if (!background) setLoading(false);
+      });
   };
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 10000); // Sync every 10 seconds
+    classApi
+      .list()
+      .then((data) => {
+        setClasses(data.data);
+      })
+      .catch((err) => toast.error(apiErrorMessage(err)));
+    const interval = setInterval(() => load({ background: true }), 10000); // Sync every 10 seconds
     return () => clearInterval(interval);
   }, []);
 
-  // Inline update for type or status dropdowns
   const handleInlineUpdate = async (id, field, value) => {
-    await entities.StudentFeeReport.update(id, { [field]: value });
-    setRecords((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, [field]: value } : r)),
-    );
+    try {
+      await feeApi.updateReport(id, { [field]: value });
+      setRecords((prev) =>
+        prev.map((r) => (r._id === id ? { ...r, [field]: value } : r)),
+      );
+    } catch (err) {
+      toast.error(apiErrorMessage(err));
+    }
   };
 
-  const filtered = records
-    .filter((r) => {
-      const q = search.toLowerCase();
-      const matchSearch =
-        (r.student_name || "").toLowerCase().includes(q) ||
-        (r.student_id || "").toLowerCase().includes(q);
-      const matchClass = filterClass === "all" || r.class === filterClass;
-      const matchType = filterType === "all" || r.student_type === filterType;
-      const bal = r.balance_term_fee || 0;
-      const matchBalance =
-        filterBalance === "all" ||
-        (filterBalance === "pending" && bal > 0) ||
-        (filterBalance === "cleared" && bal <= 0);
-      return matchSearch && matchClass && matchType && matchBalance;
-    })
-    .sort((a, b) => {
-      let aVal, bVal;
-      if (sortBy === "sno") {
-        aVal = a.sno || 0;
-        bVal = b.sno || 0;
-      } else if (sortBy === "name") {
-        aVal = a.student_name || "";
-        bVal = b.student_name || "";
-      } else if (sortBy === "class") {
-        aVal = a.class || "";
-        bVal = b.class || "";
-      } else if (sortBy === "paid") {
-        aVal = a.paid_term_fee || 0;
-        bVal = b.paid_term_fee || 0;
-      } else if (sortBy === "balance") {
-        aVal = a.balance_term_fee || 0;
-        bVal = b.balance_term_fee || 0;
-      } else if (sortBy === "net_fee") {
-        aVal = a.net_term_fee || 0;
-        bVal = b.net_term_fee || 0;
-      }
-      if (typeof aVal === "string")
-        return sortDir === "asc"
-          ? aVal.localeCompare(bVal)
-          : bVal.localeCompare(aVal);
-      return sortDir === "asc" ? aVal - bVal : bVal - aVal;
-    });
+  const filtered = useMemo(() => {
+    return records
+      .filter((r) => {
+        const q = search.toLowerCase();
+        const matchSearch =
+          (r.student_name || "").toLowerCase().includes(q) ||
+          (r.mob_number || "").toLowerCase().includes(q);
+        const matchClass =
+          filterClass === "all" || classIdOf(r.class) === filterClass;
+        const matchType = filterType === "all" || r.student_type === filterType;
+        const bal = r.balance_term_fee || 0;
+        const matchBalance =
+          filterBalance === "all" ||
+          (filterBalance === "pending" && bal > 0) ||
+          (filterBalance === "cleared" && bal <= 0);
+        return matchSearch && matchClass && matchType && matchBalance;
+      })
+      .sort((a, b) => {
+        let aVal, bVal;
+        if (sortBy === "sno") {
+          aVal = a.sno || 0;
+          bVal = b.sno || 0;
+        } else if (sortBy === "name") {
+          aVal = a.student_name || "";
+          bVal = b.student_name || "";
+        } else if (sortBy === "class") {
+          aVal = classLabelOf(a.class, classesById);
+          bVal = classLabelOf(b.class, classesById);
+        } else if (sortBy === "paid") {
+          aVal = a.paid_term_fee || 0;
+          bVal = b.paid_term_fee || 0;
+        } else if (sortBy === "balance") {
+          aVal = a.balance_term_fee || 0;
+          bVal = b.balance_term_fee || 0;
+        } else if (sortBy === "net_fee") {
+          aVal = a.net_term_fee || 0;
+          bVal = b.net_term_fee || 0;
+        }
+        if (typeof aVal === "string")
+          return sortDir === "asc"
+            ? aVal.localeCompare(bVal)
+            : bVal.localeCompare(aVal);
+        return sortDir === "asc" ? aVal - bVal : bVal - aVal;
+      });
+  }, [
+    records,
+    search,
+    filterClass,
+    filterType,
+    filterBalance,
+    sortBy,
+    sortDir,
+    classesById,
+  ]);
 
-  const totals = filtered.reduce(
-    (acc, r) => ({
-      old_fee: acc.old_fee + (r.old_fee || 0),
-      adm_gross_fee: acc.adm_gross_fee + (r.adm_gross_fee || 0),
-      adm_concession: acc.adm_concession + (r.adm_concession || 0),
-      net_adm_fee: acc.net_adm_fee + (r.net_adm_fee || 0),
-      paid_adm_fee: acc.paid_adm_fee + (r.paid_adm_fee || 0),
-      balance_adm_fee: acc.balance_adm_fee + (r.balance_adm_fee || 0),
-      gross_term_fee: acc.gross_term_fee + (r.gross_term_fee || 0),
-      term_concession: acc.term_concession + (r.term_concession || 0),
-      net_term_fee: acc.net_term_fee + (r.net_term_fee || 0),
-      paid_term_fee: acc.paid_term_fee + (r.paid_term_fee || 0),
-      balance_term_fee: acc.balance_term_fee + (r.balance_term_fee || 0),
-    }),
-    {
-      old_fee: 0,
-      adm_gross_fee: 0,
-      adm_concession: 0,
-      net_adm_fee: 0,
-      paid_adm_fee: 0,
-      balance_adm_fee: 0,
-      gross_term_fee: 0,
-      term_concession: 0,
-      net_term_fee: 0,
-      paid_term_fee: 0,
-      balance_term_fee: 0,
-    },
+  const totals = useMemo(
+    () =>
+      filtered.reduce(
+        (acc, r) => ({
+          old_fee: acc.old_fee + (r.old_fee || 0),
+          adm_gross_fee: acc.adm_gross_fee + (r.adm_gross_fee || 0),
+          adm_concession: acc.adm_concession + (r.adm_concession || 0),
+          net_adm_fee: acc.net_adm_fee + (r.net_adm_fee || 0),
+          paid_adm_fee: acc.paid_adm_fee + (r.paid_adm_fee || 0),
+          balance_adm_fee: acc.balance_adm_fee + (r.balance_adm_fee || 0),
+          gross_term_fee: acc.gross_term_fee + (r.gross_term_fee || 0),
+          term_concession: acc.term_concession + (r.term_concession || 0),
+          net_term_fee: acc.net_term_fee + (r.net_term_fee || 0),
+          paid_term_fee: acc.paid_term_fee + (r.paid_term_fee || 0),
+          balance_term_fee: acc.balance_term_fee + (r.balance_term_fee || 0),
+        }),
+        {
+          old_fee: 0,
+          adm_gross_fee: 0,
+          adm_concession: 0,
+          net_adm_fee: 0,
+          paid_adm_fee: 0,
+          balance_adm_fee: 0,
+          gross_term_fee: 0,
+          term_concession: 0,
+          net_term_fee: 0,
+          paid_term_fee: 0,
+          balance_term_fee: 0,
+        },
+      ),
+    [filtered],
   );
 
-  const summaryTotals = records.reduce(
-    (acc, r) => ({
-      net_term_fee: acc.net_term_fee + (r.net_term_fee || 0),
-      paid_term_fee: acc.paid_term_fee + (r.paid_term_fee || 0),
-      balance_term_fee: acc.balance_term_fee + (r.balance_term_fee || 0),
-    }),
-    { net_term_fee: 0, paid_term_fee: 0, balance_term_fee: 0 },
+  const summaryTotals = useMemo(
+    () =>
+      records.reduce(
+        (acc, r) => ({
+          net_term_fee: acc.net_term_fee + (r.net_term_fee || 0),
+          paid_term_fee: acc.paid_term_fee + (r.paid_term_fee || 0),
+          balance_term_fee: acc.balance_term_fee + (r.balance_term_fee || 0),
+        }),
+        { net_term_fee: 0, paid_term_fee: 0, balance_term_fee: 0 },
+      ),
+    [records],
   );
-
-  const classes = [
-    ...new Set(records.map((r) => r.class).filter(Boolean)),
-  ].sort();
 
   const handleDelete = async (r) => {
     if (!confirm(`Delete record for ${r.student_name}?`)) return;
-    await entities.StudentFeeReport.delete(r.id);
-    load();
+    try {
+      await feeApi.removeReport(r._id);
+      toast.success("Record deleted.");
+      load();
+    } catch (err) {
+      toast.error(apiErrorMessage(err));
+    }
   };
 
   const handleSaved = () => {
@@ -172,7 +237,7 @@ export default function StudentFeeReportPage() {
   const handleExport = () => {
     const headers = [
       "S.No",
-      "Student ID",
+      "Admission No",
       "Student Name",
       "Father Name",
       "Mob Number",
@@ -184,7 +249,7 @@ export default function StudentFeeReportPage() {
       "Paid Adm Fee",
       "Balance Adm Fee",
       "Old Fee",
-      "Gross Term Fee 26-27",
+      "Gross Term Fee",
       "Term Concession",
       "Net Term Fee",
       "Paid Term Fee",
@@ -198,7 +263,7 @@ export default function StudentFeeReportPage() {
       r.student_name,
       r.father_name,
       r.mob_number,
-      r.class,
+      classLabelOf(r.class, classesById),
       r.student_type,
       r.adm_gross_fee || 0,
       r.adm_concession || 0,
@@ -220,19 +285,18 @@ export default function StudentFeeReportPage() {
       10,
     ].map((w) => ({ wch: w }));
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Fee Report 2026-27");
-    XLSX.writeFile(wb, "student-fee-report-2026-27.xlsx");
+    XLSX.utils.book_append_sheet(wb, ws, "Fee Report");
+    XLSX.writeFile(wb, "student-fee-report.xlsx");
   };
 
   const handlePrint = () => window.print();
 
   return (
     <div className="p-5">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-5">
         <div>
           <h2 className="text-xl font-bold text-slate-800">
-            Student Fee Report — 2026-27
+            Student Fee Report
           </h2>
           <p className="text-sm text-slate-500">
             Complete fee collection status for all students
@@ -245,8 +309,7 @@ export default function StudentFeeReportPage() {
             onClick={handlePrint}
             className="gap-1"
           >
-            <Printer className="w-3.5 h-3.5" />
-            Print
+            <Printer className="w-3.5 h-3.5" /> Print
           </Button>
           <Button
             variant="outline"
@@ -254,8 +317,7 @@ export default function StudentFeeReportPage() {
             onClick={handleExport}
             className="gap-1"
           >
-            <Download className="w-3.5 h-3.5" />
-            Export
+            <Download className="w-3.5 h-3.5" /> Export
           </Button>
           <Button
             size="sm"
@@ -265,13 +327,11 @@ export default function StudentFeeReportPage() {
             }}
             className="bg-indigo-600 hover:bg-indigo-700 gap-1"
           >
-            <Plus className="w-4 h-4" />
-            Add Student Record
+            <Plus className="w-4 h-4" /> Add Student Record
           </Button>
         </div>
       </div>
 
-      {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <SummaryCard
           label="Total Students"
@@ -295,12 +355,11 @@ export default function StudentFeeReportPage() {
         />
       </div>
 
-      {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-4 no-print">
         <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <Input
-            placeholder="Search name or ID..."
+            placeholder="Search name or mobile..."
             className="pl-9 h-9"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -313,8 +372,8 @@ export default function StudentFeeReportPage() {
           <SelectContent>
             <SelectItem value="all">All Classes</SelectItem>
             {classes.map((c) => (
-              <SelectItem key={c} value={c}>
-                {c}
+              <SelectItem key={c._id} value={c._id}>
+                Class {c.grade}
               </SelectItem>
             ))}
           </SelectContent>
@@ -361,7 +420,6 @@ export default function StudentFeeReportPage() {
         </button>
       </div>
 
-      {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-xs border-collapse">
@@ -383,7 +441,7 @@ export default function StudentFeeReportPage() {
                   colSpan={6}
                   className="bg-amber-700 text-white text-center py-2 px-3 font-semibold text-xs uppercase tracking-wide border-r border-amber-600"
                 >
-                  Term Fee 2026-27
+                  Term Fee
                 </th>
                 <th className="bg-slate-600 text-white text-center py-2 px-3 font-semibold text-xs uppercase tracking-wide border-r border-slate-500">
                   Remarks
@@ -398,7 +456,7 @@ export default function StudentFeeReportPage() {
               <tr className="bg-slate-100 border-b border-slate-300">
                 {[
                   "S.No",
-                  "Student ID",
+                  "Admission No",
                   "Student Name",
                   "Father Name",
                   "Mob Number",
@@ -428,7 +486,7 @@ export default function StudentFeeReportPage() {
                 ))}
                 {[
                   "Old Fee",
-                  "Gross Term Fee 26-27",
+                  "Gross Term Fee",
                   "Concession",
                   "Net Term Fee",
                   "Paid Term Fee",
@@ -453,7 +511,7 @@ export default function StudentFeeReportPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
+              {loading && records.length === 0 ? (
                 <tr>
                   <td colSpan={21} className="text-center py-10 text-slate-400">
                     Loading...
@@ -470,12 +528,14 @@ export default function StudentFeeReportPage() {
                   const admBal = r.balance_adm_fee || 0;
                   const termBal = r.balance_term_fee || 0;
                   return (
-                    <tr key={r.id} className="hover:bg-slate-50">
+                    <tr key={r._id} className="hover:bg-slate-50">
                       <td className="px-3 py-2 text-slate-500 border-r border-slate-100">
                         {i + 1}
                       </td>
                       <td className="px-3 py-2 text-indigo-600 font-medium border-r border-slate-100 whitespace-nowrap">
-                        {r.student_id}
+                        {typeof r.student_id === "object"
+                          ? r.student_id?.admission_no || r.student_id?._id
+                          : r.student_id}
                       </td>
                       <td className="px-3 py-2 font-semibold text-slate-800 border-r border-slate-100 whitespace-nowrap">
                         {r.student_name}
@@ -487,9 +547,8 @@ export default function StudentFeeReportPage() {
                         {r.mob_number}
                       </td>
                       <td className="px-3 py-2 text-slate-700 font-medium border-r border-slate-100">
-                        {r.class}
+                        {classLabelOf(r.class, classesById)}
                       </td>
-                      {/* Type badge */}
                       <td className="px-3 py-2 border-r border-slate-100">
                         <span
                           className={`px-2 py-0.5 rounded-full text-xs font-semibold ${r.student_type === "Existing" ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"}`}
@@ -497,7 +556,6 @@ export default function StudentFeeReportPage() {
                           {r.student_type || "—"}
                         </span>
                       </td>
-                      {/* Admission Fee */}
                       <td className="px-3 py-2 text-right text-slate-700 border-r border-slate-100">
                         {fmtNum(r.adm_gross_fee)}
                       </td>
@@ -515,7 +573,6 @@ export default function StudentFeeReportPage() {
                       >
                         {admBal > 0 ? fmtNum(admBal) : "₹0"}
                       </td>
-                      {/* Term Fee */}
                       <td className="px-3 py-2 text-right text-slate-600 border-r border-slate-100">
                         {r.student_type === "New" ? "—" : fmtNum(r.old_fee)}
                       </td>
@@ -545,7 +602,6 @@ export default function StudentFeeReportPage() {
                             : r.remarks || "—"}
                         </span>
                       </td>
-                      {/* Status badge */}
                       <td className="px-3 py-2 border-r border-slate-100">
                         <span
                           className={`px-2 py-0.5 rounded-full text-xs font-semibold ${r.status === "Active" || !r.status ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"}`}
@@ -578,7 +634,6 @@ export default function StudentFeeReportPage() {
               )}
             </tbody>
 
-            {/* Totals row */}
             {filtered.length > 0 && (
               <tfoot>
                 <tr className="bg-slate-800 text-white font-bold text-xs">
@@ -641,7 +696,6 @@ export default function StudentFeeReportPage() {
             setEditing(null);
           }}
           onSaved={handleSaved}
-          nextSno={records.length + 1}
         />
       )}
     </div>

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
-import { entities } from "@/api/entityClient";
+import React, { useState, useEffect, useRef, useMemo } from "react";
+import { studentApi, classApi, marksApi } from "@/api/api";
 import { Search, Printer, FileText, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+// Matches Marks.subject exactly - it's a strict enum on the schema (see
+// models/Marks.js), not free text.
 const SUBJECTS = [
   "Maths",
   "Science",
@@ -20,20 +22,9 @@ const SUBJECTS = [
   "Computer",
 ];
 const EXAM_TYPES = ["Quarterly", "Half Yearly", "Final"];
-const CLASSES = [
-  "Class 1",
-  "Class 2",
-  "Class 3",
-  "Class 4",
-  "Class 5",
-  "Class 6",
-  "Class 7",
-  "Class 8",
-  "Class 9",
-  "Class 10",
-  "Class 11",
-  "Class 12",
-];
+
+// Class model only has `grade` (no separate `section`) — see models/Class.js.
+const classLabel = (c) => (c ? `Class ${c.grade}` : "—");
 
 const getGrade = (pct) => {
   if (pct >= 90) return { grade: "A+", color: "#16a34a", bg: "#f0fdf4" };
@@ -53,7 +44,9 @@ const getRemark = (pct) => {
   return "Needs Improvement";
 };
 
-// Maps old exam_type values from DB to our display names
+// Maps exam_type values from the DB (Marks.exam_type enum: "Unit Test",
+// "Mid Term", "Final" - see models/Marks.js) to the report card's own
+// display names.
 const EXAM_MAP = {
   Quarterly: "Quarterly",
   "Half Yearly": "Half Yearly",
@@ -64,25 +57,38 @@ const EXAM_MAP = {
 
 export default function BPReportCard() {
   const [students, setStudents] = useState([]);
+  const [classes, setClasses] = useState([]);
   const [allMarks, setAllMarks] = useState([]);
-  const [filterClass, setFilterClass] = useState("");
+  const [filterClass, setFilterClass] = useState("All");
   const [search, setSearch] = useState("");
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [loading, setLoading] = useState(true);
   const printRef = useRef();
 
   useEffect(() => {
-    Promise.all([entities.Student.list(), entities.Marks.list()]).then(
-      ([s, m]) => {
+    Promise.all([studentApi.list(), marksApi.list(), classApi.list()]).then(
+      ([s, m, c]) => {
         setStudents(s.filter((st) => st.status === "Active"));
         setAllMarks(m);
+        setClasses(c.data);
         setLoading(false);
       },
     );
   }, []);
 
+  const classesById = useMemo(
+    () =>
+      Object.fromEntries(
+        (Array.isArray(classes) ? classes : []).map((c) => [c._id, c]),
+      ),
+    [classes],
+  );
+
+  const studentClassId = (s) => s.class?._id || s.class;
+
   const filtered = students.filter((s) => {
-    const matchClass = !filterClass || s.class === filterClass;
+    const matchClass =
+      filterClass === "All" || studentClassId(s) === filterClass;
     const matchSearch =
       !search ||
       s.full_name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -168,6 +174,10 @@ export default function BPReportCard() {
       </div>
     );
 
+  const selectedClassDoc = selectedStudent
+    ? classesById[studentClassId(selectedStudent)]
+    : null;
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -196,10 +206,10 @@ export default function BPReportCard() {
             <SelectValue placeholder="All Classes" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={null}>All Classes</SelectItem>
-            {CLASSES.map((c) => (
-              <SelectItem key={c} value={c}>
-                {c}
+            <SelectItem value="All">All Classes</SelectItem>
+            {classes.map((c) => (
+              <SelectItem key={c._id} value={c._id}>
+                {classLabel(c)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -221,16 +231,16 @@ export default function BPReportCard() {
               </div>
             )}
             {filtered.map((s) => {
-              const report = getStudentReport(s.id);
+              const report = getStudentReport(s._id);
               const pct = overallSummary(report);
               const { grade, color } = pct
                 ? getGrade(pct)
                 : { grade: "—", color: "#94a3b8" };
               return (
                 <button
-                  key={s.id}
+                  key={s._id}
                   onClick={() => setSelectedStudent(s)}
-                  className={`w-full text-left px-4 py-3 hover:bg-indigo-50 transition-colors ${selectedStudent?.id === s.id ? "bg-indigo-50 border-l-2 border-indigo-500" : ""}`}
+                  className={`w-full text-left px-4 py-3 hover:bg-indigo-50 transition-colors ${selectedStudent?._id === s._id ? "bg-indigo-50 border-l-2 border-indigo-500" : ""}`}
                 >
                   <div className="flex items-center justify-between">
                     <div>
@@ -238,7 +248,8 @@ export default function BPReportCard() {
                         {s.full_name}
                       </p>
                       <p className="text-xs text-slate-400">
-                        {s.class} · {s.section || "—"} · {s.admission_no}
+                        {classLabel(classesById[studentClassId(s)])} ·{" "}
+                        {s.admission_no}
                       </p>
                     </div>
                     <span className="text-sm font-bold" style={{ color }}>
@@ -297,13 +308,10 @@ export default function BPReportCard() {
                   {[
                     ["Student Name", selectedStudent.full_name],
                     ["Admission No", selectedStudent.admission_no || "—"],
-                    [
-                      "Class & Section",
-                      `${selectedStudent.class} · ${selectedStudent.section || "—"}`,
-                    ],
+                    ["Class", classLabel(selectedClassDoc)],
                     ["Gender", selectedStudent.gender || "—"],
                     ["Roll No", selectedStudent.roll_no || "—"],
-                    ["Academic Year", "2025–26"],
+                    ["Academic Year", selectedClassDoc?.academic_year || "—"],
                   ].map(([label, value]) => (
                     <div key={label} className="info-item flex gap-1.5">
                       <span className="info-label font-semibold text-slate-500">
@@ -316,7 +324,7 @@ export default function BPReportCard() {
 
                 {/* Exam Sections */}
                 {(() => {
-                  const report = getStudentReport(selectedStudent.id);
+                  const report = getStudentReport(selectedStudent._id);
                   const sectionColors = {
                     Quarterly: {
                       bg: "bg-indigo-600",
@@ -470,7 +478,7 @@ export default function BPReportCard() {
 
                 {/* Overall Summary */}
                 {(() => {
-                  const report = getStudentReport(selectedStudent.id);
+                  const report = getStudentReport(selectedStudent._id);
                   const pct = overallSummary(report);
                   if (!pct) return null;
                   const { grade, color, bg } = getGrade(pct);

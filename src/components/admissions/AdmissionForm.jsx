@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { entities } from "@/api/entityClient";
+import { admissionApi, branchApi, uploadApi, classApi } from "@/api/api";
+import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -9,32 +10,87 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { X, Upload, Printer, CheckCircle } from "lucide-react";
-import { uploadApi } from "@/api/uploadApi";
+import { X, Upload, Printer, CheckCircle, Plus, Trash2 } from "lucide-react";
 
-const CLASSES = [
-  "LKG",
-  "UKG",
-  "Class 1",
-  "Class 2",
-  "Class 3",
-  "Class 4",
-  "Class 5",
-  "Class 6",
-  "Class 7",
-  "Class 8",
-  "Class 9",
-  "Class 10",
-  "Class 11",
-  "Class 12",
-];
 const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"];
+const GENDERS = ["Male", "Female", "Other"];
 
+const PINCODE_RE = /^[1-9][0-9]{5}$/;
+const EMPTY_ADDRESS = {
+  line1: "",
+  line2: "",
+  city: "",
+  district: "",
+  state: "",
+  pincode: "",
+  country: "India",
+};
+
+const EMPTY_SCHOOL = { standard: "", year: "", name: "" };
+const MAX_PREVIOUS_SCHOOLS = 10;
+
+// Merged from the old two separate checklists - see models/Admission.js
+// (DOCUMENT_TYPES) for the reasoning on dropping the old generic
+// "id_proof" entry in favor of the specific aadhaar/ration/passport ones.
+const DOCUMENT_OPTIONS = [
+  { value: "dob_certificate", label: "Date of Birth Certificate" },
+  { value: "passport_photos", label: "Passport Size Photos" },
+  { value: "transfer_certificate", label: "Transfer Certificate" },
+  { value: "progress_record", label: "Progress Record / Report Card" },
+  { value: "caste_certificate", label: "Caste Certificate" },
+  { value: "aadhaar_card", label: "Aadhaar Card" },
+  { value: "ration_card", label: "Ration Card" },
+  { value: "passport", label: "Passport" },
+  { value: "other", label: "Other" },
+];
+
+// Indian school-year convention: April -> next March. So in July 2026
+// this returns "2026-27"; in Feb 2027 it would still return "2026-27".
+function getCurrentAcademicYear() {
+  const now = new Date();
+  const month = now.getMonth() + 1; // 1-12
+  const year = now.getFullYear();
+  return month >= 4
+    ? `${year}-${String(year + 1).slice(-2)}`
+    : `${year - 1}-${String(year).slice(-2)}`;
+}
+
+const D = [
+  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+  [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
+  [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
+  [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
+  [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
+  [5, 9, 8, 7, 6, 0, 4, 3, 2, 1],
+  [6, 5, 9, 8, 7, 1, 0, 4, 3, 2],
+  [7, 6, 5, 9, 8, 2, 1, 0, 4, 3],
+  [8, 7, 6, 5, 9, 3, 2, 1, 0, 4],
+  [9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
+];
+const P = [
+  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+  [1, 5, 7, 6, 2, 8, 3, 0, 9, 4],
+  [5, 8, 0, 3, 7, 9, 6, 1, 4, 2],
+  [8, 9, 1, 6, 0, 4, 3, 5, 2, 7],
+  [9, 4, 5, 3, 1, 2, 6, 8, 7, 0],
+  [4, 2, 8, 6, 5, 7, 3, 9, 0, 1],
+  [2, 7, 9, 3, 8, 0, 6, 4, 1, 5],
+  [7, 0, 4, 6, 9, 1, 3, 2, 5, 8],
+];
+function isValidVerhoeff(numStr) {
+  if (!/^\d+$/.test(numStr || "")) return false;
+  let c = 0;
+  const digits = numStr.split("").reverse().map(Number);
+  for (let i = 0; i < digits.length; i++) c = D[c][P[i % 8][digits[i]]];
+  return c === 0;
+}
+const isValidAadhaar = (v) => /^\d{12}$/.test(v || "") && isValidVerhoeff(v);
+
+// unique_id, application_no, and admission_no are all generated
+// server-side now (see utils/admissionNumbering.js) - never part of the
+// editable form state.
 const EMPTY_FORM = {
-  academic_year: "",
-  unique_id: "",
-  application_no: "",
-  admission_no: "",
+  academic_year: getCurrentAcademicYear(),
   state: "Telangana",
   branch: "",
   form_status: "Enquiry",
@@ -48,8 +104,8 @@ const EMPTY_FORM = {
   religion: "",
   mother_tongue: "",
   caste: "",
-  id_mark_1: "",
-  id_mark_2: "",
+  identification_mark_1: "",
+  identification_mark_2: "",
   blood_group: "",
   health_status: "",
   passport_photo: "",
@@ -64,29 +120,12 @@ const EMPTY_FORM = {
   mother_mobile: "",
   mother_email: "",
   family_income_pa: "",
-  communication_address: "",
-  permanent_address: "",
+  communication_address: { ...EMPTY_ADDRESS },
+  permanent_address: { ...EMPTY_ADDRESS },
   same_as_communication: false,
-  prev_school_1_standard: "",
-  prev_school_1_year: "",
-  prev_school_1_name: "",
-  prev_school_2_standard: "",
-  prev_school_2_year: "",
-  prev_school_2_name: "",
-  prev_school_3_standard: "",
-  prev_school_3_year: "",
-  prev_school_3_name: "",
-  doc_dob_cert: false,
-  doc_passport_photos: false,
-  doc_transfer_cert: false,
-  doc_id_proof: false,
-  doc_progress_record: false,
-  doc_caste_cert: false,
+  previous_schools: [],
+  documents_collected: [],
   aadhaar_no: "",
-  submit_aadhaar: false,
-  submit_ration_card: false,
-  submit_passport: false,
-  submit_other: false,
   source_direct: false,
   source_tele_call: false,
   source_outdoor_ads: false,
@@ -97,9 +136,6 @@ const EMPTY_FORM = {
   term3_due_date: "",
   declaration_accepted: false,
   declaration_date: "",
-  student_signature: "",
-  parent_signature: "",
-  principal_signature: "",
 };
 
 function SectionBanner({ num, title, color = "blue" }) {
@@ -132,7 +168,6 @@ function Field({ label, required, children, className = "" }) {
   );
 }
 
-// Letter-box style name input
 function LetterBoxInput({ value, onChange, maxLength = 30 }) {
   const boxes = Array.from({ length: maxLength });
   const chars = (value || "").toUpperCase().split("");
@@ -162,7 +197,6 @@ function LetterBoxInput({ value, onChange, maxLength = 30 }) {
   );
 }
 
-// Aadhaar 4-4-4 grouped input
 function AadhaarInput({ value, onChange }) {
   const digits = (value || "").replace(/\D/g, "").slice(0, 12);
   const g1 = digits.slice(0, 4);
@@ -210,22 +244,113 @@ export default function AdmissionForm({
   onSaved,
   onAdmit,
 }) {
-  const [form, setForm] = useState(
-    admission ? { ...EMPTY_FORM, ...admission } : { ...EMPTY_FORM },
-  );
+  const { user } = useAuth();
+
+  const [form, setForm] = useState(() => {
+    if (!admission) return { ...EMPTY_FORM };
+    return {
+      ...EMPTY_FORM,
+      ...admission,
+      branch: admission.branch?._id || admission.branch || "",
+      communication_address: {
+        ...EMPTY_ADDRESS,
+        ...(admission.communication_address || {}),
+      },
+      permanent_address: {
+        ...EMPTY_ADDRESS,
+        ...(admission.permanent_address || {}),
+      },
+      previous_schools: admission.previous_schools || [],
+      documents_collected: admission.documents_collected || [],
+      dob: admission.dob ? String(admission.dob).split("T")[0] : "",
+      declaration_date: admission.declaration_date
+        ? String(admission.declaration_date).split("T")[0]
+        : "",
+      term1_due_date: admission.term1_due_date
+        ? String(admission.term1_due_date).split("T")[0]
+        : "",
+      term2_due_date: admission.term2_due_date
+        ? String(admission.term2_due_date).split("T")[0]
+        : "",
+      term3_due_date: admission.term3_due_date
+        ? String(admission.term3_due_date).split("T")[0]
+        : "",
+    };
+  });
+  const [classes, setClasses] = useState([]);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState({});
   const [errors, setErrors] = useState({});
 
   const set = (k, v) => setForm((prev) => ({ ...prev, [k]: v }));
+  const setAddress = (which, key, v) =>
+    setForm((prev) => ({ ...prev, [which]: { ...prev[which], [key]: v } }));
+
+  // Accounts managers (and other SINGLE_BRANCH_ROLES) carry a single
+  // `branch` ObjectId on their user record. Some auth payloads embed it
+  // populated ({_id, name, ...}), some just send the bare id - handle
+  // both rather than assuming one shape.
+  const resolvedBranchId =
+    typeof user?.branch === "object" ? user?.branch?._id : user?.branch;
+  const resolvedBranchNameFromAuth =
+    typeof user?.branch === "object" ? user?.branch?.name : null;
+
+  const [branchName, setBranchName] = useState(
+    resolvedBranchNameFromAuth || "",
+  );
+
+  // Lock the form's branch to the user's own branch on CREATE only -
+  // never on edit, so opening an existing admission never silently
+  // rewrites which branch it belongs to.
+  useEffect(() => {
+    if (!admission && resolvedBranchId) {
+      set("branch", resolvedBranchId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedBranchId]);
+
+  // Only hit the network for a branch name if the auth payload didn't
+  // already give us one. NOTE: there's no confirmed single-branch-by-id
+  // endpoint in api.js, so this still falls back to branchApi.list() and
+  // filters client-side - worth adding a GET /api/branches/:id if this
+  // list ever gets large.
+  useEffect(() => {
+    if (resolvedBranchNameFromAuth || !resolvedBranchId) return;
+    branchApi.list().then((list) => {
+      const match = (list || []).find((b) => b._id === resolvedBranchId);
+      if (match) setBranchName(match.name);
+    });
+  }, [resolvedBranchId, resolvedBranchNameFromAuth]);
+
+  // Classes are scoped to the user's own branch + the selected academic
+  // year, instead of fetching every class in the system. If the
+  // currently-selected class isn't in the refreshed list (e.g. academic
+  // year changed), clear the selection rather than leaving a stale id.
+  useEffect(() => {
+    if (!resolvedBranchId) return;
+    classApi
+      .list({ branch: resolvedBranchId, academic_year: form.academic_year })
+      .then((data) => {
+        const list = data?.data || data || [];
+        setClasses(list);
+        if (
+          form.class_sought &&
+          !list.some((c) => c._id === form.class_sought)
+        ) {
+          set("class_sought", "");
+        }
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedBranchId, form.academic_year]);
 
   useEffect(() => {
     if (form.same_as_communication) {
       setForm((prev) => ({
         ...prev,
-        permanent_address: prev.communication_address,
+        permanent_address: { ...prev.communication_address },
       }));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.same_as_communication, form.communication_address]);
 
   const feeAmt = parseFloat(form.fee_payable_amount) || 0;
@@ -236,13 +361,27 @@ export default function AdmissionForm({
   const uploadFile = async (field, file) => {
     if (!file) return;
     setUploading((p) => ({ ...p, [field]: true }));
-    const { file_url } = await integrations.Core.UploadFile({ file });
-    set(field, file_url);
-    setUploading((p) => ({ ...p, [field]: false }));
+    try {
+      const { url } = await uploadApi.uploadFile(file, "documents");
+      set(field, url);
+    } finally {
+      setUploading((p) => ({ ...p, [field]: false }));
+    }
+  };
+
+  const addressErrors = (addr, prefix) => {
+    const e = {};
+    if (!addr?.line1) e[`${prefix}_line1`] = "Required";
+    if (!addr?.city) e[`${prefix}_city`] = "Required";
+    if (!addr?.state) e[`${prefix}_state`] = "Required";
+    if (!addr?.pincode || !PINCODE_RE.test(addr.pincode))
+      e[`${prefix}_pincode`] = "Invalid 6-digit PIN code";
+    return e;
   };
 
   const validate = (isSubmit) => {
     const e = {};
+    if (!form.branch) e.branch = "Required";
     if (!form.student_name) e.student_name = "Required";
     if (!form.gender) e.gender = "Required";
     if (!form.dob) e.dob = "Required";
@@ -251,125 +390,112 @@ export default function AdmissionForm({
       e.father_mobile = "Must be 10 digits";
     if (!form.mother_mobile || form.mother_mobile.length !== 10)
       e.mother_mobile = "Must be 10 digits";
-    if (form.aadhaar_no && form.aadhaar_no.length !== 12)
-      e.aadhaar_no = "Must be 12 digits";
+    if (form.aadhaar_no && !isValidAadhaar(form.aadhaar_no))
+      e.aadhaar_no = "Not a valid Aadhaar number";
+    Object.assign(e, addressErrors(form.communication_address, "comm"));
     if (isSubmit) {
       if (!form.declaration_accepted) e.declaration_accepted = "Required";
-      if (!form.passport_photo) e.passport_photo = "Required";
-      if (!form.aadhaar_no || form.aadhaar_no.length !== 12)
-        e.aadhaar_no = "Must be 12 digits";
+      // if (!form.passport_photo) e.passport_photo = "Required";
+      if (!isValidAadhaar(form.aadhaar_no))
+        e.aadhaar_no = "A valid 12-digit Aadhaar number is required";
+      Object.assign(e, addressErrors(form.permanent_address, "perm"));
     }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
+  const addSchool = () => {
+    if (form.previous_schools.length >= MAX_PREVIOUS_SCHOOLS) return;
+    setForm((prev) => ({
+      ...prev,
+      previous_schools: [...prev.previous_schools, { ...EMPTY_SCHOOL }],
+    }));
+  };
+  const removeSchool = (idx) => {
+    setForm((prev) => ({
+      ...prev,
+      previous_schools: prev.previous_schools.filter((_, i) => i !== idx),
+    }));
+  };
+  const setSchoolField = (idx, key, v) => {
+    setForm((prev) => ({
+      ...prev,
+      previous_schools: prev.previous_schools.map((s, i) =>
+        i === idx ? { ...s, [key]: v } : s,
+      ),
+    }));
+  };
+
+  const toggleDocument = (value) => {
+    setForm((prev) => ({
+      ...prev,
+      documents_collected: prev.documents_collected.includes(value)
+        ? prev.documents_collected.filter((d) => d !== value)
+        : [...prev.documents_collected, value],
+    }));
+  };
+
+  const buildPayload = (formStatus) => ({
+    ...form,
+    form_status: formStatus,
+    family_income_pa: parseFloat(form.family_income_pa) || 0,
+    height_cm: parseFloat(form.height_cm) || 0,
+    weight_kg: parseFloat(form.weight_kg) || 0,
+    fee_payable_amount: parseFloat(form.fee_payable_amount) || 0,
+  });
+
   const handleSaveDraft = async () => {
     if (!validate(false)) return;
     setSaving(true);
-    const payload = {
-      ...form,
-      form_status: "Applied",
-      family_income_pa: parseFloat(form.family_income_pa) || 0,
-      height_cm: parseFloat(form.height_cm) || 0,
-      weight_kg: parseFloat(form.weight_kg) || 0,
-      fee_payable_amount: parseFloat(form.fee_payable_amount) || 0,
-    };
-    if (!payload.application_no) {
-      const list = await entities.Admission.list();
-      payload.application_no = `APP-${String(list.length + 1).padStart(3, "0")}`;
+    try {
+      const payload = buildPayload("Applied");
+      if (admission?._id) await admissionApi.update(admission._id, payload);
+      else await admissionApi.create(payload);
+      onSaved();
+    } finally {
+      setSaving(false);
     }
-    if (admission?.id) await entities.Admission.update(admission.id, payload);
-    else await entities.Admission.create(payload);
-    setSaving(false);
-    onSaved();
   };
 
   const handleSubmit = async () => {
     if (!validate(true)) return;
     setSaving(true);
-    const payload = {
-      ...form,
-      form_status: "Under Review",
-      family_income_pa: parseFloat(form.family_income_pa) || 0,
-      height_cm: parseFloat(form.height_cm) || 0,
-      weight_kg: parseFloat(form.weight_kg) || 0,
-      fee_payable_amount: parseFloat(form.fee_payable_amount) || 0,
-    };
-    if (!payload.application_no) {
-      const list = await entities.Admission.list();
-      payload.application_no = `APP-${String(list.length + 1).padStart(3, "0")}`;
+    try {
+      const payload = buildPayload("Under Review");
+      if (admission?._id) await admissionApi.update(admission._id, payload);
+      else await admissionApi.create(payload);
+      // NOTE: the old version of this form also created a
+      // StudentFeeReport entry here for fee tracking. Per the current
+      // flow, fee-report assignment now happens separately in the
+      // Accounts Manager panel (against the Student created at
+      // admit/convert time), so that side-effect stays dropped here
+      // rather than silently reproduced.
+      onSaved();
+    } finally {
+      setSaving(false);
     }
-
-    // Save admission
-    let savedAdmission;
-    if (admission?.id) {
-      savedAdmission = await entities.Admission.update(admission.id, payload);
-    } else {
-      savedAdmission = await entities.Admission.create(payload);
-    }
-
-    // Create StudentFeeReport entry for fee tracking
-    const feeAmt = parseFloat(form.fee_payable_amount) || 0;
-    const term1 = Math.round(feeAmt * 0.4);
-    const term2 = Math.round(feeAmt * 0.4);
-    const term3 = Math.round(feeAmt * 0.2);
-
-    await entities.StudentFeeReport.create({
-      student_id: savedAdmission.id,
-      student_name: form.student_name,
-      father_name: form.father_name,
-      mob_number: form.father_mobile,
-      class: form.class_sought,
-      student_type: "New",
-      adm_gross_fee: feeAmt,
-      adm_concession: 0,
-      net_adm_fee: feeAmt,
-      paid_adm_fee: 0,
-      balance_adm_fee: feeAmt,
-      gross_term_fee: term1 + term2 + term3,
-      term_concession: 0,
-      net_term_fee: term1 + term2 + term3,
-      paid_term_fee: 0,
-      balance_term_fee: term1 + term2 + term3,
-      status: "Active",
-      remarks: `New admission - ${form.academic_year}`,
-    });
-
-    setSaving(false);
-    onSaved();
   };
 
   const handleAdmit = async () => {
-    if (!admission?.id) return;
+    if (!admission?._id) return;
+    if (!isValidAadhaar(form.aadhaar_no)) {
+      setErrors((e) => ({
+        ...e,
+        aadhaar_no: "A valid 12-digit Aadhaar number is required to admit.",
+      }));
+      return;
+    }
     setSaving(true);
-    const list = await entities.Admission.list();
-    const admNo = `ADM-${String(list.filter((a) => a.form_status === "Admitted").length + 1).padStart(3, "0")}`;
-    await entities.Admission.update(admission.id, {
-      ...form,
-      form_status: "Admitted",
-      admission_no: admNo,
-    });
-
-    // Create student record
-    const student = await entities.Student.create({
-      full_name: form.student_name,
-      admission_no: admNo,
-      class: form.class_sought.replace("Class ", ""),
-      section: "",
-      gender: form.gender,
-      dob: form.dob,
-      blood_group: form.blood_group || "",
-      parent_name: form.father_name,
-      parent_phone: form.father_mobile,
-      parent_email: form.father_email || "",
-      address: form.communication_address,
-      joining_date: new Date().toISOString().split("T")[0],
-      status: "Active",
-    });
-
-    setSaving(false);
-    onSaved();
-    if (onAdmit) onAdmit(student);
+    try {
+      await admissionApi.update(admission._id, buildPayload("Under Review"));
+      const { admission: updatedAdmission, student } = await admissionApi.admit(
+        admission._id,
+      );
+      onSaved();
+      if (onAdmit) onAdmit(student);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handlePrint = () => window.print();
@@ -405,7 +531,7 @@ export default function AdmissionForm({
       onValueChange={(v) => set(k, v)}
       disabled={readOnly}
     >
-      <SelectTrigger className="h-8 text-sm">
+      <SelectTrigger className="h-8 text-sm w-full">
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
@@ -418,12 +544,12 @@ export default function AdmissionForm({
     </Select>
   );
 
-  const chk = (k, label) => (
+  const chk = (checked, onChange, label) => (
     <label className="flex items-center gap-2 text-sm cursor-pointer">
       <input
         type="checkbox"
-        checked={!!form[k]}
-        onChange={(e) => set(k, e.target.checked)}
+        checked={!!checked}
+        onChange={(e) => onChange(e.target.checked)}
         disabled={readOnly}
         className="rounded border-slate-300 h-4 w-4 accent-indigo-600"
       />
@@ -431,62 +557,79 @@ export default function AdmissionForm({
     </label>
   );
 
-  const fileUpload = (k, label) => (
-    <div className="border-2 border-dashed border-slate-300 rounded-lg p-3 text-center min-h-[80px] flex flex-col items-center justify-center gap-1">
-      <p className="text-xs font-medium text-slate-500 mb-1">{label}</p>
-      {form[k] ? (
-        <div className="flex items-center gap-2">
-          <a
-            href={form[k]}
-            target="_blank"
-            rel="noreferrer"
-            className="text-xs text-indigo-600 underline"
-          >
-            View
-          </a>
-          {!readOnly && (
-            <button
-              type="button"
-              onClick={() => set(k, "")}
-              className="text-red-400"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          )}
-        </div>
-      ) : !readOnly ? (
-        <label className="cursor-pointer">
-          <span className="inline-flex items-center gap-1 text-xs text-indigo-600 border border-indigo-300 rounded px-2 py-1 hover:bg-indigo-50">
-            {uploading[k] ? (
-              "Uploading..."
-            ) : (
-              <>
-                <Upload className="w-3 h-3" /> Upload
-              </>
-            )}
-          </span>
-          <input
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => uploadFile(k, e.target.files[0])}
-          />
-        </label>
-      ) : (
-        <span className="text-xs text-slate-400">Not uploaded</span>
-      )}
-      {errors[k] && <p className="text-xs text-red-500">{errors[k]}</p>}
+  // Structured address block - line1/city/state/pincode required (matches
+  // addressSchema), reused for both communication_address and
+  // permanent_address.
+  const addressFields = (which, prefix) => (
+    <div className="grid grid-cols-2 gap-3">
+      <Field label="Address Line 1" required className="col-span-2">
+        <Input
+          value={form[which]?.line1 || ""}
+          onChange={(e) => setAddress(which, "line1", e.target.value)}
+          className={`h-8 text-sm ${errors[`${prefix}_line1`] ? "border-red-400" : ""}`}
+          disabled={readOnly}
+        />
+      </Field>
+      <Field label="Address Line 2" className="col-span-2">
+        <Input
+          value={form[which]?.line2 || ""}
+          onChange={(e) => setAddress(which, "line2", e.target.value)}
+          className="h-8 text-sm"
+          disabled={readOnly}
+        />
+      </Field>
+      <Field label="City" required>
+        <Input
+          value={form[which]?.city || ""}
+          onChange={(e) => setAddress(which, "city", e.target.value)}
+          className={`h-8 text-sm ${errors[`${prefix}_city`] ? "border-red-400" : ""}`}
+          disabled={readOnly}
+        />
+      </Field>
+      <Field label="District">
+        <Input
+          value={form[which]?.district || ""}
+          onChange={(e) => setAddress(which, "district", e.target.value)}
+          className="h-8 text-sm"
+          disabled={readOnly}
+        />
+      </Field>
+      <Field label="State" required>
+        <Input
+          value={form[which]?.state || ""}
+          onChange={(e) => setAddress(which, "state", e.target.value)}
+          className={`h-8 text-sm ${errors[`${prefix}_state`] ? "border-red-400" : ""}`}
+          disabled={readOnly}
+        />
+      </Field>
+      <Field label="Pincode" required>
+        <Input
+          value={form[which]?.pincode || ""}
+          onChange={(e) => setAddress(which, "pincode", e.target.value)}
+          placeholder="6-digit PIN"
+          className={`h-8 text-sm ${errors[`${prefix}_pincode`] ? "border-red-400" : ""}`}
+          disabled={readOnly}
+        />
+      </Field>
+      <Field label="Country" className="col-span-2">
+        <Input
+          value={form[which]?.country || "India"}
+          onChange={(e) => setAddress(which, "country", e.target.value)}
+          className="h-8 text-sm"
+          disabled={readOnly}
+        />
+      </Field>
     </div>
   );
 
   const isUnderReview =
     admission?.form_status === "Under Review" ||
     form.form_status === "Under Review";
+  const alreadyConverted = !!admission?.student_id;
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 py-6 px-4">
       <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl">
-        {/* Sticky Header */}
         <div className="sticky top-0 z-10 bg-white rounded-t-2xl border-b border-slate-200 px-6 py-3 flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">
@@ -517,15 +660,34 @@ export default function AdmissionForm({
           {/* TOP HEADER FIELDS */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-slate-50 border border-slate-200 rounded-xl p-4">
             <Field label="Academic Year" required>
-              {inp("academic_year", "2024-25")}
+              {inp("academic_year", "2026-27")}
             </Field>
-            <Field label="Unique ID">{inp("unique_id")}</Field>
-            <Field label="Application No." required>
-              {inp("application_no", "APP-001")}
+            {/* unique_id / application_no / admission_no are generated
+                server-side - shown read-only once assigned, blank until
+                the record is first saved. */}
+            <Field label="Unique ID">
+              <Input
+                value={admission?.unique_id || "Assigned on save"}
+                disabled
+                className="h-8 text-sm bg-slate-100"
+              />
             </Field>
-            <Field label="Admission No.">
-              {inp("admission_no", "ADM-001")}
+            <Field label="Application No.">
+              <Input
+                value={admission?.application_no || "Assigned on save"}
+                disabled
+                className="h-8 text-sm bg-slate-100"
+              />
             </Field>
+            {admission?.admission_no && (
+              <Field label="Admission No.">
+                <Input
+                  value={admission.admission_no}
+                  disabled
+                  className="h-8 text-sm bg-slate-100"
+                />
+              </Field>
+            )}
             <Field label="State">
               {sel(
                 "state",
@@ -534,10 +696,16 @@ export default function AdmissionForm({
               )}
             </Field>
             <Field label="Branch">
-              {sel(
-                "branch",
-                ["Hyderabad", "Secunderabad", "Kukatpally", "Miyapur"],
-                "Select Branch",
+              {/* Auto-set to the logged-in accounts manager's own branch -
+                  no picker, since this role only ever creates admissions
+                  for their own branch (see resolvedBranchId above). */}
+              <Input
+                value={branchName || "Your branch"}
+                disabled
+                className="h-8 text-sm bg-slate-100 w-full"
+              />
+              {errors.branch && (
+                <p className="text-xs text-red-500 mt-0.5">{errors.branch}</p>
               )}
             </Field>
           </div>
@@ -546,10 +714,31 @@ export default function AdmissionForm({
           <div>
             <SectionBanner num="1" title="Student Details" />
             <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
-              {/* Left block */}
               <div className="md:col-span-2 space-y-4">
                 <Field label="Class Sought" required>
-                  {sel("class_sought", CLASSES, "Select Class")}
+                  <Select
+                    value={form.class_sought}
+                    onValueChange={(v) => set("class_sought", v)}
+                    disabled={readOnly}
+                  >
+                    <SelectTrigger className="h-8 text-sm w-full">
+                      <SelectValue placeholder="Select Class" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {classes.map((b) => (
+                        <SelectItem key={b._id} value={b._id}>
+                          {["LKG", "UKG"].includes(b.grade)
+                            ? b.grade
+                            : `Class ${b.grade}`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {errors.class_sought && (
+                    <p className="text-xs text-red-500 mt-0.5">
+                      {errors.class_sought}
+                    </p>
+                  )}
                 </Field>
                 <Field label="Student Name (In Block Letters)" required>
                   <LetterBoxInput
@@ -566,7 +755,7 @@ export default function AdmissionForm({
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="Gender" required>
                     <div className="flex gap-4 mt-1">
-                      {["Male", "Female"].map((g) => (
+                      {GENDERS.map((g) => (
                         <label
                           key={g}
                           className="flex items-center gap-1.5 cursor-pointer text-sm font-medium"
@@ -669,8 +858,12 @@ export default function AdmissionForm({
                   </div>
                 </Field>
                 <div className="grid grid-cols-2 gap-4">
-                  <Field label="ID Mark 1">{inp("id_mark_1")}</Field>
-                  <Field label="ID Mark 2">{inp("id_mark_2")}</Field>
+                  <Field label="Identification Mark 1">
+                    {inp("identification_mark_1")}
+                  </Field>
+                  <Field label="Identification Mark 2">
+                    {inp("identification_mark_2")}
+                  </Field>
                 </div>
                 <Field label="Medical / Health Information (any info school should know)">
                   {textArea(
@@ -679,7 +872,6 @@ export default function AdmissionForm({
                   )}
                 </Field>
               </div>
-              {/* Right — passport photo */}
               <div className="flex flex-col gap-3">
                 <div
                   className="border-2 border-dashed border-slate-300 rounded-xl overflow-hidden"
@@ -738,7 +930,6 @@ export default function AdmissionForm({
           <div>
             <SectionBanner num="2" title="Parent / Guardian Details" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Father */}
               <div className="bg-blue-50 rounded-xl p-4 space-y-3">
                 <p className="text-xs font-bold text-blue-700 uppercase tracking-wide border-b border-blue-200 pb-1 mb-2">
                   Father's Details
@@ -771,7 +962,6 @@ export default function AdmissionForm({
                 </Field>
                 <Field label="Email">{inp("father_email")}</Field>
               </div>
-              {/* Mother */}
               <div className="bg-pink-50 rounded-xl p-4 space-y-3">
                 <p className="text-xs font-bold text-pink-700 uppercase tracking-wide border-b border-pink-200 pb-1 mb-2">
                   Mother's Details
@@ -829,14 +1019,17 @@ export default function AdmissionForm({
           <div>
             <SectionBanner num="3" title="Address / Contact Details" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <Field label="Communication Address" required>
-                {textArea("communication_address")}
-              </Field>
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-medium text-slate-600">
+                <p className="text-xs font-medium text-slate-600 mb-2">
+                  Communication Address <span className="text-red-500">*</span>
+                </p>
+                {addressFields("communication_address", "comm")}
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium text-slate-600">
                     Permanent Address <span className="text-red-500">*</span>
-                  </label>
+                  </p>
                   <label className="flex items-center gap-1.5 text-xs cursor-pointer text-indigo-600 font-medium">
                     <input
                       type="checkbox"
@@ -850,17 +1043,14 @@ export default function AdmissionForm({
                     Same as above
                   </label>
                 </div>
-                {textArea("permanent_address")}
+                {addressFields("permanent_address", "perm")}
               </div>
             </div>
           </div>
 
-          {/* SECTION 4 — PREVIOUS SCHOOL */}
+          {/* SECTION 4 — PREVIOUS SCHOOLS (array, up to 10) */}
           <div>
-            <SectionBanner
-              num="4"
-              title="Details of the School Last Studied In"
-            />
+            <SectionBanner num="4" title="Details of Previous Schools" />
             <div className="overflow-x-auto rounded-xl border border-slate-200">
               <table className="w-full text-sm">
                 <thead className="bg-slate-100">
@@ -877,24 +1067,67 @@ export default function AdmissionForm({
                     <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500">
                       School Name & Address
                     </th>
+                    <th className="w-10"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {[1, 2, 3].map((i) => (
+                  {form.previous_schools.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={5}
+                        className="px-4 py-4 text-center text-slate-400 text-xs"
+                      >
+                        No previous schools added yet.
+                      </td>
+                    </tr>
+                  )}
+                  {form.previous_schools.map((school, i) => (
                     <tr key={i}>
                       <td className="px-4 py-2 text-slate-400 font-medium">
-                        {i}
+                        {i + 1}
                       </td>
                       <td className="px-4 py-2">
-                        {inp(`prev_school_${i}_standard`, "e.g. Class 7")}
+                        <Input
+                          value={school.standard}
+                          onChange={(e) =>
+                            setSchoolField(i, "standard", e.target.value)
+                          }
+                          placeholder="e.g. Class 7"
+                          className="h-8 text-sm"
+                          disabled={readOnly}
+                        />
                       </td>
                       <td className="px-4 py-2">
-                        {inp(`prev_school_${i}_year`, "e.g. 2022-23")}
+                        <Input
+                          value={school.year}
+                          onChange={(e) =>
+                            setSchoolField(i, "year", e.target.value)
+                          }
+                          placeholder="e.g. 2022-23"
+                          className="h-8 text-sm"
+                          disabled={readOnly}
+                        />
                       </td>
                       <td className="px-4 py-2">
-                        {inp(
-                          `prev_school_${i}_name`,
-                          "School name and address",
+                        <Input
+                          value={school.name}
+                          onChange={(e) =>
+                            setSchoolField(i, "name", e.target.value)
+                          }
+                          placeholder="School name and address"
+                          className="h-8 text-sm"
+                          disabled={readOnly}
+                        />
+                      </td>
+                      <td className="px-2 py-2">
+                        {!readOnly && (
+                          <button
+                            type="button"
+                            onClick={() => removeSchool(i)}
+                            className="text-red-400 hover:text-red-600 p-1"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         )}
                       </td>
                     </tr>
@@ -902,52 +1135,82 @@ export default function AdmissionForm({
                 </tbody>
               </table>
             </div>
+            {!readOnly && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={addSchool}
+                disabled={form.previous_schools.length >= MAX_PREVIOUS_SCHOOLS}
+                className="gap-1.5 mt-2 text-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add School{" "}
+                {form.previous_schools.length > 0 &&
+                  `(${form.previous_schools.length}/${MAX_PREVIOUS_SCHOOLS})`}
+              </Button>
+            )}
           </div>
 
-          {/* SECTION 5 — DOCUMENTS */}
+          {/* SECTION 5 — DOCUMENTS (single merged array) */}
           <div>
             <SectionBanner num="5" title="Documents Collected" />
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="space-y-2">
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">
-                  Documents Required
-                </p>
-                {chk("doc_dob_cert", "Date of Birth Certificate")}
-                {chk("doc_passport_photos", "Passport Size Photos")}
-                {chk("doc_transfer_cert", "Transfer Certificate")}
-                {chk("doc_id_proof", "ID Proof")}
-                {chk("doc_progress_record", "Progress Record / Report Card")}
-                {chk("doc_caste_cert", "Caste Certificate")}
-              </div>
-              <div className="space-y-2">
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">
-                  Submitted Docs
-                </p>
-                {chk("submit_aadhaar", "Aadhaar Card")}
-                {chk("submit_ration_card", "Ration Card")}
-                {chk("submit_passport", "Passport")}
-                {chk("submit_other", "Other")}
-                <div className="mt-4 pt-4 border-t border-slate-200">
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">
-                    Source of Enquiry
+
+            {/* Aadhaar moved to the top of this section - it's the one
+                truly mandatory field here, so it leads rather than
+                trailing after the checklist and enquiry-source blocks. */}
+            <div className="mb-6 max-w-sm">
+              <Field label="Aadhaar No. — Mandatory" required>
+                <AadhaarInput
+                  value={form.aadhaar_no}
+                  onChange={(v) => set("aadhaar_no", v)}
+                />
+                {errors.aadhaar_no && (
+                  <p className="text-xs text-red-500 mt-1">
+                    {errors.aadhaar_no}
                   </p>
-                  {chk("source_direct", "Direct")}
-                  {chk("source_tele_call", "Tele Call")}
-                  {chk("source_outdoor_ads", "Outdoor Advertisements")}
-                </div>
-              </div>
-              <div>
-                <Field label="Aadhaar No. — Mandatory" required>
-                  <AadhaarInput
-                    value={form.aadhaar_no}
-                    onChange={(v) => set("aadhaar_no", v)}
+                )}
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              {DOCUMENT_OPTIONS.map((d) => (
+                <label
+                  key={d.value}
+                  className="flex items-center gap-2 text-sm cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.documents_collected.includes(d.value)}
+                    onChange={() => toggleDocument(d.value)}
+                    disabled={readOnly}
+                    className="rounded border-slate-300 h-4 w-4 accent-indigo-600"
                   />
-                  {errors.aadhaar_no && (
-                    <p className="text-xs text-red-500 mt-1">
-                      {errors.aadhaar_no}
-                    </p>
-                  )}
-                </Field>
+                  <span className="text-slate-700">{d.label}</span>
+                </label>
+              ))}
+            </div>
+
+            <div>
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">
+                Source of Enquiry
+              </p>
+              <div className="flex flex-wrap gap-4">
+                {chk(
+                  form.source_direct,
+                  (v) => set("source_direct", v),
+                  "Direct",
+                )}
+                {chk(
+                  form.source_tele_call,
+                  (v) => set("source_tele_call", v),
+                  "Tele Call",
+                )}
+                {chk(
+                  form.source_outdoor_ads,
+                  (v) => set("source_outdoor_ads", v),
+                  "Outdoor Advertisements",
+                )}
               </div>
             </div>
           </div>
@@ -1019,7 +1282,7 @@ export default function AdmissionForm({
             </div>
           </div>
 
-          {/* SECTION 7 — DECLARATION */}
+          {/* SECTION 7 — DECLARATION (signature uploads removed) */}
           <div>
             <SectionBanner num="7" title="Declaration" color="amber" />
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 mb-4">
@@ -1052,22 +1315,15 @@ export default function AdmissionForm({
                 </p>
               )}
             </div>
-            <div className="mb-4">
-              <Field label="Application Date" required>
-                <Input
-                  type="date"
-                  value={form.declaration_date || ""}
-                  onChange={(e) => set("declaration_date", e.target.value)}
-                  className="h-8 text-sm w-full max-w-xs"
-                  disabled={readOnly}
-                />
-              </Field>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {fileUpload("student_signature", "Student Signature")}
-              {fileUpload("parent_signature", "Parent Signature *")}
-              {fileUpload("principal_signature", "Principal's Signature")}
-            </div>
+            <Field label="Application Date" required>
+              <Input
+                type="date"
+                value={form.declaration_date || ""}
+                onChange={(e) => set("declaration_date", e.target.value)}
+                className="h-8 text-sm w-full max-w-xs"
+                disabled={readOnly}
+              />
+            </Field>
           </div>
         </div>
 
@@ -1085,7 +1341,7 @@ export default function AdmissionForm({
               >
                 {saving ? "Saving..." : "Save as Draft"}
               </Button>
-              {isUnderReview && (
+              {isUnderReview && !alreadyConverted && (
                 <Button
                   onClick={handleAdmit}
                   disabled={saving}

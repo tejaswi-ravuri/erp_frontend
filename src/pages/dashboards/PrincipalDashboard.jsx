@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { entities } from "@/api/entityClient";
+import React, { useState, useEffect, useMemo } from "react";
+import { userApi, studentApi, marksApi, classApi } from "@/api/api";
 import { Link } from "react-router-dom";
 import {
   Briefcase,
@@ -9,64 +9,85 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 
-const CLASSES = [
-  "Class 1",
-  "Class 2",
-  "Class 3",
-  "Class 4",
-  "Class 5",
-  "Class 6",
-  "Class 7",
-  "Class 8",
-  "Class 9",
-  "Class 10",
-];
+const ROLE_LABELS = {
+  teacher: "Teacher",
+  admin_officer: "Admin Officer",
+  principal: "Principal",
+  accounts_manager: "Accounts Manager",
+  super_admin: "Super Admin",
+};
+const roleLabel = (r) => ROLE_LABELS[r] || r;
+
+const formatSubjects = (val) =>
+  Array.isArray(val) && val.length ? val.join(", ") : "—";
 
 export default function PrincipalDashboard() {
   const [staff, setStaff] = useState([]);
   const [students, setStudents] = useState([]);
   const [marks, setMarks] = useState([]);
+  const [classes, setClasses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("staff");
 
   useEffect(() => {
     Promise.all([
-      entities.Staff.list(),
-      entities.Student.list("full_name", 200),
-      entities.Marks.list("-created_date", 100),
-    ]).then(([s, st, m]) => {
+      userApi.list({ exclude_role: "student" }),
+      studentApi.list({ sort: "full_name", limit: 200 }),
+      marksApi.list({ sort: "-created_date", limit: 100 }),
+      classApi.list(),
+    ]).then(([s, st, m, c]) => {
       setStaff(s);
       setStudents(st);
       setMarks(m);
+      setClasses(c.data);
       setLoading(false);
     });
   }, []);
 
-  const classSummary = CLASSES.map((cls) => {
-    const classStudents = students.filter(
-      (s) => s.class === cls || s.class === cls.replace("Class ", ""),
-    );
-    const classMarks = marks.filter((m) => m.class === cls);
-    const avg =
-      classMarks.length > 0
-        ? Math.round(
-            classMarks.reduce(
-              (s, m) => s + (m.marks_obtained / m.max_marks) * 100,
-              0,
-            ) / classMarks.length,
-          )
-        : null;
-    const teacher = staff.find((st) => st.role === "Teacher");
-    return {
-      cls,
-      count: classStudents.length,
-      avg,
-      teacher: teacher?.full_name || "Not Assigned",
-    };
-  }).filter((c) => c.count > 0);
+  const studentClassId = (s) => s.class?._id || s.class;
+  const marksClassId = (m) => m.class?._id || m.class;
 
-  const teachers = staff.filter((s) => s.role === "Teacher");
-  const admins = staff.filter((s) => s.role === "Admin");
+  // Built from the real Class docs (classApi.list()), not a hardcoded
+  // "Class 1".."Class 10" list - a branch may have LKG/UKG or fewer/more
+  // grades than that array assumed, and grades sort via grade_order
+  // rather than parsing a label string.
+  const classSummary = useMemo(() => {
+    return classes
+      .map((cls) => {
+        const classStudents = students.filter(
+          (s) => studentClassId(s) === cls._id,
+        );
+        const classMarks = marks.filter((m) => marksClassId(m) === cls._id);
+        const avg =
+          classMarks.length > 0
+            ? Math.round(
+                classMarks.reduce(
+                  (sum, m) => sum + (m.marks_obtained / m.max_marks) * 100,
+                  0,
+                ) / classMarks.length,
+              )
+            : null;
+        return {
+          id: cls._id,
+          label: `Class ${cls.grade}`,
+          gradeOrder: cls.grade_order ?? 999,
+          count: classStudents.length,
+          avg,
+          // class_teacher is populated server-side (see
+          // classController.listClasses) - this is the actual homeroom
+          // teacher for THIS class, not just "the first teacher found
+          // anywhere," which is what the old version did.
+          teacher: cls.class_teacher?.full_name || "Not Assigned",
+        };
+      })
+      .filter((c) => c.count > 0)
+      .sort((a, b) => a.gradeOrder - b.gradeOrder);
+  }, [classes, students, marks]);
+
+  const teachers = staff.filter((s) => s.role === "teacher");
+  // Computed for a potential future stat card - not currently rendered,
+  // same as in the previous version of this file.
+  const admins = staff.filter((s) => s.role === "admin_officer");
 
   return (
     <div className="space-y-6">
@@ -175,19 +196,25 @@ export default function PrincipalDashboard() {
                   </tr>
                 )}
                 {staff.map((s) => (
-                  <tr key={s.id} className="hover:bg-slate-50">
+                  <tr key={s._id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-semibold text-slate-800 text-xs">
                       {s.full_name}
                     </td>
                     <td className="px-4 py-3 text-xs">
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${s.role === "Teacher" ? "bg-indigo-100 text-indigo-700" : s.role === "Admin" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-600"}`}
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                          s.role === "teacher"
+                            ? "bg-indigo-100 text-indigo-700"
+                            : s.role === "admin_officer"
+                              ? "bg-violet-100 text-violet-700"
+                              : "bg-slate-100 text-slate-600"
+                        }`}
                       >
-                        {s.role}
+                        {roleLabel(s.role)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-600 text-xs">
-                      {s.subject_taught || "—"}
+                      {formatSubjects(s.subject_taught)}
                     </td>
                     <td className="px-4 py-3 text-slate-500 text-xs">
                       {s.qualification || "—"}
@@ -197,9 +224,9 @@ export default function PrincipalDashboard() {
                     </td>
                     <td className="px-4 py-3">
                       <span
-                        className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${s.status === "Active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}
+                        className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${s.is_active === false ? "bg-slate-100 text-slate-500" : "bg-emerald-100 text-emerald-700"}`}
                       >
-                        {s.status}
+                        {s.is_active === false ? "Inactive" : "Active"}
                       </span>
                     </td>
                   </tr>
@@ -212,19 +239,22 @@ export default function PrincipalDashboard() {
 
       {activeTab === "classes" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {classSummary.map(({ cls, count, avg }) => (
+          {classSummary.map(({ id, label, count, avg, teacher }) => (
             <div
-              key={cls}
+              key={id}
               className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 hover:shadow-md transition-shadow"
             >
               <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-bold text-slate-800">{cls}</p>
+                <p className="text-sm font-bold text-slate-800">{label}</p>
                 <ArrowUpRight className="w-4 h-4 text-slate-300" />
               </div>
               <p className="text-3xl font-black text-indigo-600 mb-1">
                 {count}
               </p>
-              <p className="text-xs text-slate-500 mb-3">students enrolled</p>
+              <p className="text-xs text-slate-500 mb-1">students enrolled</p>
+              <p className="text-xs text-slate-400 mb-3">
+                Class Teacher: {teacher}
+              </p>
               {avg !== null && (
                 <div className="mt-2">
                   <div className="flex justify-between text-xs mb-1">

@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
-import { entities } from "@/api/entityClient";
+import React, { useState, useEffect, useMemo } from "react";
+import { homeworkApi, studentApi, classApi } from "@/api/api";
+import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -9,10 +10,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Bell, CheckCircle, BookOpen, Trash2 } from "lucide-react";
+import { Plus, Bell, BookOpen, Trash2 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 
-const SUBJECTS = [
+// Fallback subject list for non-teacher roles, who aren't restricted to a
+// personal subject/class assignment. A teacher instead only ever sees the
+// subjects they actually teach in the selected class (see
+// subjectOptionsForForm below).
+const FALLBACK_SUBJECTS = [
   "Maths",
   "Science",
   "English",
@@ -23,34 +28,71 @@ const SUBJECTS = [
   "Physics",
   "Chemistry",
 ];
-const CLASSES = [
-  "LKG",
-  "UKG",
-  "Class 1",
-  "Class 2",
-  "Class 3",
-  "Class 4",
-  "Class 5",
-  "Class 6",
-  "Class 7",
-  "Class 8",
-  "Class 9",
-  "Class 10",
-  "Class 11",
-  "Class 12",
-];
 
+// Class model only has `grade` (no separate `section`) — see models/Class.js.
+const classLabel = (c) => (c ? `Class ${c.grade}` : "—");
+
+const fmtDate = (d) => {
+  if (!d) return "Not set";
+  return new Date(d).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+// `class` is a Class _id now (not a free-text string like "Class 5"), and
+// there's no `section` field on Homework anymore. `assigned_by` isn't
+// collected from the form at all - the server sets it from the logged-in
+// user, since it's a User reference, not free text.
 const EMPTY = {
   title: "",
   subject: "",
   class: "",
-  section: "",
   description: "",
   due_date: "",
-  assigned_by: "Teacher",
 };
 
 export default function HomeworkManager() {
+  const { user } = useAuth();
+  const role = user?.role;
+  const isTeacher = role === "teacher";
+  const myId = user?.id || user?._id;
+
+  const [classes, setClasses] = useState([]);
+  useEffect(() => {
+    classApi.list().then((data) => setClasses(data.data));
+  }, []);
+
+  // class_id -> [subjects this teacher teaches there], read from each
+  // Class's own `subject_teachers` (the single source of truth - see
+  // models/Class.js). Non-teacher roles aren't restricted at all.
+  const mySubjectsByClassId = useMemo(() => {
+    if (!isTeacher) return {};
+    const map = {};
+    classes.forEach((c) => {
+      const subjects =
+        c.my_subjects && c.my_subjects.length
+          ? c.my_subjects
+          : (c.subject_teachers || [])
+              .filter(
+                (st) =>
+                  String(st.teacher_id?._id || st.teacher_id) === String(myId),
+              )
+              .map((st) => st.subject);
+      if (subjects.length > 0) map[c._id] = subjects;
+    });
+    return map;
+  }, [classes, isTeacher, myId]);
+
+  // Classes a teacher can even pick from - anywhere they teach at least
+  // one subject. Non-teacher roles see every class in the branch.
+  const visibleClasses = useMemo(
+    () =>
+      isTeacher ? classes.filter((c) => mySubjectsByClassId[c._id]) : classes,
+    [classes, isTeacher, mySubjectsByClassId],
+  );
+
   const [homeworks, setHomeworks] = useState([]);
   const [students, setStudents] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -62,8 +104,8 @@ export default function HomeworkManager() {
 
   const load = () =>
     Promise.all([
-      entities.Homework.list("-created_date", 50),
-      entities.Student.list("full_name", 500),
+      homeworkApi.list({ sort: "-created_date", limit: 50 }),
+      studentApi.list(),
     ]).then(([h, s]) => {
       setHomeworks(h);
       setStudents(s);
@@ -73,64 +115,70 @@ export default function HomeworkManager() {
     load();
   }, []);
 
+  // Subjects selectable in the form for the currently-chosen class -
+  // always the teacher's own subject(s) for that class; unrestricted for
+  // non-teacher roles.
+  const subjectOptionsForForm = useMemo(() => {
+    if (!isTeacher) return FALLBACK_SUBJECTS;
+    if (!form.class) return [];
+    return mySubjectsByClassId[form.class] || [];
+  }, [isTeacher, form.class, mySubjectsByClassId]);
+
+  const canSubmitForm =
+    form.title &&
+    form.class &&
+    form.subject &&
+    form.due_date &&
+    (!isTeacher || subjectOptionsForForm.includes(form.subject));
+
   const save = async () => {
+    if (!canSubmitForm) return;
     setSaving(true);
-    await entities.Homework.create({ ...form, status: "Active" });
-    setForm({ ...EMPTY });
-    setShowForm(false);
-    await load();
-    setSaving(false);
-    toast({
-      title: "✅ Homework Added",
-      description: `"${form.title}" saved for ${form.class}`,
-    });
+    try {
+      console.log(form);
+      const classDoc = classes.find((c) => c._id === form.class);
+      await homeworkApi.create({ ...form, status: "Active" });
+      setForm({ ...EMPTY });
+      setShowForm(false);
+      await load();
+      toast({
+        title: "✅ Homework Added",
+        description: `"${form.title}" saved for ${classLabel(classDoc)}`,
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const notifyStudents = async (hw) => {
-    setNotifyingId(hw.id);
-    const classStudents = students.filter((s) => s.class === hw.class);
-    if (classStudents.length === 0) {
-      toast({
-        title: "⚠️ No students found",
-        description: `No students found in ${hw.class}`,
-      });
+    setNotifyingId(hw.id || hw._id);
+    try {
+      const { notified } = await homeworkApi.notify(hw.id || hw._id);
+      if (notified === 0) {
+        toast({
+          title: "⚠️ No students found",
+          description: `No active students found in ${classLabel(hw.class)}`,
+        });
+      } else {
+        toast({
+          title: "🔔 Notifications Sent!",
+          description: `Notified ${notified} students in ${classLabel(hw.class)} about "${hw.title}"`,
+        });
+      }
+    } finally {
       setNotifyingId(null);
-      return;
     }
-    // Create notification for each student
-    await Promise.all(
-      classStudents.map((s) =>
-        entities.HomeworkNotification.create({
-          homework_id: hw.id,
-          title: hw.title,
-          subject: hw.subject,
-          description: hw.description,
-          class: hw.class,
-          section: hw.section || "",
-          due_date: hw.due_date,
-          assigned_by: hw.assigned_by || "Teacher",
-          student_id: s.id,
-          student_name: s.full_name,
-          status: "Unread",
-        }),
-      ),
-    );
-    setNotifyingId(null);
-    toast({
-      title: "🔔 Notifications Sent!",
-      description: `Notified ${classStudents.length} students in ${hw.class} about "${hw.title}"`,
-    });
   };
 
   const deleteHw = async (id) => {
-    await entities.Homework.delete(id);
+    await homeworkApi.remove(id);
     await load();
   };
 
   const filtered =
     filterClass === "All"
       ? homeworks
-      : homeworks.filter((h) => h.class === filterClass);
+      : homeworks.filter((h) => (h.class?._id || h.class) === filterClass);
 
   return (
     <div className="space-y-5">
@@ -169,65 +217,76 @@ export default function HomeworkManager() {
                 className="text-sm"
               />
             </div>
-            {[
-              { label: "Class", key: "class", opts: CLASSES },
-              { label: "Subject", key: "subject", opts: SUBJECTS },
-            ].map((f) => (
-              <div key={f.key}>
-                <label className="text-xs font-medium text-slate-500 mb-1 block">
-                  {f.label}
-                </label>
-                <Select
-                  value={form[f.key]}
-                  onValueChange={(v) => setForm((p) => ({ ...p, [f.key]: v }))}
-                >
-                  <SelectTrigger className="text-sm">
-                    <SelectValue placeholder={`Select ${f.label}`} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {f.opts.map((o) => (
-                      <SelectItem key={o} value={o}>
-                        {o}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ))}
             <div>
               <label className="text-xs font-medium text-slate-500 mb-1 block">
-                Section
+                Class *
               </label>
-              <Input
-                value={form.section}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, section: e.target.value }))
+              <Select
+                value={form.class}
+                onValueChange={(v) =>
+                  setForm((p) => ({ ...p, class: v, subject: "" }))
                 }
-                placeholder="A / B / C"
-                className="text-sm"
-              />
+              >
+                <SelectTrigger className="text-sm">
+                  <SelectValue placeholder="Select Class" />
+                </SelectTrigger>
+                <SelectContent>
+                  {visibleClasses.map((c) => (
+                    <SelectItem key={c._id} value={c._id}>
+                      {classLabel(c)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {isTeacher && visibleClasses.length === 0 && (
+                <p className="text-[11px] text-red-500 mt-1">
+                  You aren't assigned to teach any class yet.
+                </p>
+              )}
             </div>
             <div>
               <label className="text-xs font-medium text-slate-500 mb-1 block">
-                Due Date
+                Subject *
+              </label>
+              <Select
+                value={form.subject}
+                onValueChange={(v) => setForm((p) => ({ ...p, subject: v }))}
+                disabled={isTeacher && !form.class}
+              >
+                <SelectTrigger className="text-sm">
+                  <SelectValue
+                    placeholder={
+                      isTeacher && !form.class
+                        ? "Pick a class first"
+                        : "Select Subject"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {subjectOptionsForForm.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {isTeacher &&
+                form.class &&
+                subjectOptionsForForm.length === 0 && (
+                  <p className="text-[11px] text-red-500 mt-1">
+                    You don't teach a subject for this class.
+                  </p>
+                )}
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-500 mb-1 block">
+                Due Date *
               </label>
               <Input
                 type="date"
                 value={form.due_date}
                 onChange={(e) =>
                   setForm((p) => ({ ...p, due_date: e.target.value }))
-                }
-                className="text-sm"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-500 mb-1 block">
-                Assigned By
-              </label>
-              <Input
-                value={form.assigned_by}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, assigned_by: e.target.value }))
                 }
                 className="text-sm"
               />
@@ -253,7 +312,7 @@ export default function HomeworkManager() {
             </Button>
             <Button
               onClick={save}
-              disabled={saving || !form.title || !form.class}
+              disabled={saving || !canSubmitForm}
               className="bg-sky-600 hover:bg-sky-700"
             >
               {saving ? "Saving..." : "Save Homework"}
@@ -270,9 +329,9 @@ export default function HomeworkManager() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="All">All Classes</SelectItem>
-            {CLASSES.map((c) => (
-              <SelectItem key={c} value={c}>
-                {c}
+            {visibleClasses.map((c) => (
+              <SelectItem key={c._id} value={c._id}>
+                {classLabel(c)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -289,7 +348,7 @@ export default function HomeworkManager() {
         )}
         {filtered.map((hw) => (
           <div
-            key={hw.id}
+            key={hw.id || hw._id}
             className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex items-start justify-between gap-4"
           >
             <div className="flex items-start gap-3">
@@ -303,7 +362,7 @@ export default function HomeworkManager() {
                     {hw.subject}
                   </span>
                   <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-semibold">
-                    {hw.class} {hw.section}
+                    {classLabel(hw.class)}
                   </span>
                   <span
                     className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${hw.status === "Active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}
@@ -317,7 +376,8 @@ export default function HomeworkManager() {
                   </p>
                 )}
                 <p className="text-xs text-slate-400 mt-1">
-                  Due: {hw.due_date || "Not set"} · By: {hw.assigned_by || "—"}
+                  Due: {fmtDate(hw.due_date)} · By:{" "}
+                  {hw.assigned_by?.full_name || "—"}
                 </p>
               </div>
             </div>
@@ -325,14 +385,16 @@ export default function HomeworkManager() {
               <Button
                 size="sm"
                 onClick={() => notifyStudents(hw)}
-                disabled={notifyingId === hw.id}
+                disabled={notifyingId === (hw.id || hw._id)}
                 className="bg-amber-500 hover:bg-amber-600 text-white gap-1.5 text-xs"
               >
                 <Bell className="w-3.5 h-3.5" />
-                {notifyingId === hw.id ? "Notifying..." : "Notify Students"}
+                {notifyingId === (hw.id || hw._id)
+                  ? "Notifying..."
+                  : "Notify Students"}
               </Button>
               <button
-                onClick={() => deleteHw(hw.id)}
+                onClick={() => deleteHw(hw.id || hw._id)}
                 className="text-slate-300 hover:text-red-500 transition-colors p-1.5"
               >
                 <Trash2 className="w-4 h-4" />

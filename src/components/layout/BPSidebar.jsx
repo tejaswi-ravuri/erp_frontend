@@ -22,6 +22,7 @@ const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, path: "/" },
   { label: "Admissions", icon: UserPlus, path: "/admissions" },
   { label: "Students", icon: Users, path: "/students" },
+  { label: "Classes", icon: GraduationCap, path: "/classes" },
   { label: "Staff", icon: Briefcase, path: "/staff" },
   { label: "Attendance", icon: ClipboardCheck, path: "/attendance" },
   { label: "Marks", icon: BookOpen, path: "/marks" },

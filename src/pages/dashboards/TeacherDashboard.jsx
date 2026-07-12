@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { entities } from "@/api/entityClient";
+import React, { useState, useEffect, useMemo } from "react";
+import { studentApi, attendanceApi, marksApi, classApi } from "@/api/api";
 import { Link } from "react-router-dom";
 import {
   Users,
@@ -17,28 +17,46 @@ const fmt = (d) => {
   return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 };
 
+// Class model only has `grade` (no separate `section`) — see models/Class.js.
+const classLabel = (c) => (c ? `Class ${c.grade}` : "—");
+
 export default function TeacherDashboard() {
   const [students, setStudents] = useState([]);
+  const [classes, setClasses] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [marks, setMarks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedClass, setSelectedClass] = useState("All");
 
   useEffect(() => {
+    const todayISO = new Date().toISOString().split("T")[0];
     Promise.all([
-      entities.Student.list("full_name", 200),
-      entities.Attendance.filter({
-        date: new Date().toISOString().split("T")[0],
-      }),
-      entities.Marks.list("-created_date", 20),
-    ]).then(([s, a, m]) => {
+      studentApi.list(),
+      attendanceApi.list({ date: todayISO }),
+      marksApi.list({ sort: "-created_date", limit: 20 }),
+      classApi.list(),
+    ]).then(([s, a, m, c]) => {
       setStudents(s);
       setAttendance(a);
       setMarks(m);
+      setClasses(c.data);
       setLoading(false);
     });
   }, []);
 
+  // Keyed by `_id` — Class docs don't have an `id` alias, only the raw
+  // Mongo `_id` (see models/Class.js).
+  const classesById = useMemo(
+    () =>
+      Object.fromEntries(
+        (Array.isArray(classes) ? classes : []).map((c) => [c._id, c]),
+      ),
+    [classes],
+  );
+
+  // Student.class_id is a reference to Class (possibly populated), not a
+  // free-text string — matches the convention used across Attendance/Marks.
+  const studentClassId = (s) => s.class;
   const today = new Date();
   const todayMMDD = `${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
@@ -47,14 +65,19 @@ export default function TeacherDashboard() {
     return s.dob.slice(5) === todayMMDD;
   });
 
-  const classes = [
-    "All",
-    ...new Set(students.map((s) => s.class).filter(Boolean)),
-  ].sort();
+  // Distinct classes actually present among the (already role-scoped)
+  // student list, labelled from the real Class docs.
+  const classOptions = useMemo(() => {
+    const ids = [...new Set(students.map(studentClassId).filter(Boolean))];
+    return ids
+      .map((id) => ({ id, label: classLabel(classesById[id]) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [students, classesById]);
+
   const filteredStudents =
     selectedClass === "All"
       ? students
-      : students.filter((s) => s.class === selectedClass);
+      : students.filter((s) => studentClassId(s) === selectedClass);
 
   const presentToday = attendance.filter((a) => a.status === "Present").length;
   const absentToday = attendance.filter((a) => a.status === "Absent").length;
@@ -119,9 +142,10 @@ export default function TeacherDashboard() {
               onChange={(e) => setSelectedClass(e.target.value)}
               className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 text-slate-600 focus:outline-none"
             >
-              {classes.map((c) => (
-                <option key={c} value={c}>
-                  {c}
+              <option value="All">All</option>
+              {classOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
                 </option>
               ))}
             </select>
@@ -142,7 +166,7 @@ export default function TeacherDashboard() {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {filteredStudents.slice(0, 20).map((s) => (
-                  <tr key={s.id} className="hover:bg-slate-50">
+                  <tr key={s.id || s._id} className="hover:bg-slate-50">
                     <td className="px-4 py-2.5 font-medium text-slate-800 text-xs">
                       {s.full_name}
                     </td>
@@ -150,7 +174,7 @@ export default function TeacherDashboard() {
                       {s.admission_no}
                     </td>
                     <td className="px-4 py-2.5 text-slate-600 text-xs">
-                      {s.class}
+                      {classLabel(classesById[studentClassId(s)])}
                     </td>
                     <td className="px-4 py-2.5">
                       <span
@@ -187,7 +211,10 @@ export default function TeacherDashboard() {
               <p className="text-xs text-pink-400">No birthdays today</p>
             ) : (
               birthdays.map((s) => (
-                <div key={s.id} className="flex items-center gap-2 mb-2">
+                <div
+                  key={s.id || s._id}
+                  className="flex items-center gap-2 mb-2"
+                >
                   <div className="w-7 h-7 rounded-full bg-pink-200 flex items-center justify-center text-xs font-bold text-pink-600">
                     {s.full_name[0]}
                   </div>
@@ -195,7 +222,9 @@ export default function TeacherDashboard() {
                     <p className="text-xs font-semibold text-slate-700">
                       {s.full_name}
                     </p>
-                    <p className="text-[10px] text-slate-400">{s.class}</p>
+                    <p className="text-[10px] text-slate-400">
+                      {classLabel(classesById[studentClassId(s)])}
+                    </p>
                   </div>
                 </div>
               ))
@@ -210,7 +239,7 @@ export default function TeacherDashboard() {
             <div className="space-y-2">
               {marks.slice(0, 5).map((m) => (
                 <div
-                  key={m.id}
+                  key={m.id || m._id}
                   className="flex items-center justify-between text-xs"
                 >
                   <div>

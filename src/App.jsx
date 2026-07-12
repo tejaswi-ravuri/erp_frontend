@@ -1,6 +1,3 @@
-// Auth is now: if we have a valid token → fetchMe succeeds → user is set.
-// If token is missing/expired → user is null → show RoleLogin (which is now the Login page).
-
 import { Toaster } from "sonner";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClientInstance } from "@/lib/query-client";
@@ -16,7 +13,7 @@ import RoleLayout from "@/components/layout/RoleLayout";
 import FinanceDashboard from "@/pages/dashboards/FinanceDashboard";
 import TeacherDashboard from "@/pages/dashboards/TeacherDashboard";
 import PrincipalDashboard from "@/pages/dashboards/PrincipalDashboard";
-import ConsultantDashboard from "@/pages/dashboards/ConsultantDashboard";
+import AccountsManagerDashboard from "./pages/dashboards/AccountsManagerDashboard";
 
 // New pages
 import HallTicket from "@/pages/HallTicket";
@@ -27,6 +24,7 @@ import StudentPortal from "@/pages/StudentPortal";
 import BPAdmissions from "@/pages/BPAdmissions";
 import BPStudents from "@/pages/BPStudents";
 import BPStaff from "@/pages/BPStaff";
+import BPClasses from "@/pages/BPClasses";
 import BPAttendance from "@/pages/BPAttendance";
 import BPMarks from "@/pages/BPMarks";
 import BPFees from "@/pages/BPFees";
@@ -38,12 +36,14 @@ import BPReportCard from "@/pages/BPReportCard";
 import BPTrackingExpenses from "@/pages/BPTrackingExpenses";
 import BusFeeReport from "@/pages/BusFeeReport";
 import StudentReceipt from "@/pages/StudentReceipt";
+import TeacherForm from "@/pages/TeacherForm";
+import BPIncome from "./pages/BPIncome";
 
 const DASHBOARDS = {
   finance: FinanceDashboard,
   teacher: TeacherDashboard,
   principal: PrincipalDashboard,
-  consultant: ConsultantDashboard,
+  consultant: AccountsManagerDashboard,
 };
 
 const AuthenticatedApp = () => {
@@ -61,8 +61,6 @@ const AuthenticatedApp = () => {
     );
   }
 
-  // Not logged in OR no role selected → show login/role picker
-  //uncomment when using login
   if (!user || !activeRole) {
     return <RoleLogin />;
   }
@@ -85,6 +83,7 @@ const AuthenticatedApp = () => {
         <Route path="/admissions" element={<BPAdmissions />} />
         <Route path="/students" element={<BPStudents />} />
         <Route path="/staff" element={<BPStaff />} />
+        <Route path="/classes" element={<BPClasses />} />
         <Route path="/attendance" element={<BPAttendance />} />
         <Route path="/marks" element={<BPMarks />} />
         <Route path="/fees" element={<BPFees />} />
@@ -98,6 +97,7 @@ const AuthenticatedApp = () => {
         <Route path="/student-receipt" element={<StudentReceipt />} />
         <Route path="/hall-ticket" element={<HallTicket />} />
         <Route path="/homework-manager" element={<HomeworkManager />} />
+        <Route path="/income" element={<BPIncome />} />
       </Route>
       <Route path="*" element={<PageNotFound />} />
     </Routes>
@@ -110,7 +110,11 @@ function App() {
       <QueryClientProvider client={queryClientInstance}>
         <RoleProvider>
           <Router>
-            <AuthenticatedApp />
+            <Routes>
+              <Route path="/teacher-registration" element={<TeacherForm />} />
+              {/* Everything else goes through the normal login-gated app. */}
+              <Route path="/*" element={<AuthenticatedApp />} />
+            </Routes>
           </Router>
           <Toaster />
         </RoleProvider>

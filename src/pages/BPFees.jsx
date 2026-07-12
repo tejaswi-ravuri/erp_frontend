@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { entities } from "@/api/entityClient";
+import { feeApi, classApi } from "@/api/api";
+import { useAuth } from "@/lib/AuthContext";
 import {
   Plus,
   AlertCircle,
@@ -27,80 +28,221 @@ import {
 import StatusBadge from "@/components/bp/StatusBadge";
 import { printFeeReceipt } from "@/utils/pdfExport";
 
-const EMPTY = {
-  student_id: "",
-  student_name: "",
-  academic_year: "2024-25",
-  fee_type: "Tuition",
-  amount: "",
-  payment_date: new Date().toISOString().split("T")[0],
-  payment_mode: "Cash",
-  receipt_no: "",
-  status: "Paid",
-};
+// Indian school-year convention: April -> next March.
+function getCurrentAcademicYear() {
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+  return month >= 4
+    ? `${year}-${String(year + 1).slice(-2)}`
+    : `${year - 1}-${String(year).slice(-2)}`;
+}
 
-const CLASSES = [
-  "LKG",
-  "UKG",
-  "Class 1",
-  "Class 2",
-  "Class 3",
-  "Class 4",
-  "Class 5",
-  "Class 6",
-  "Class 7",
-  "Class 8",
-  "Class 9",
-  "Class 10",
-  "Class 11",
-  "Class 12",
+const apiErrorMessage = (err) =>
+  err?.response?.data?.message ||
+  err?.response?.data?.error ||
+  err?.message ||
+  "Something went wrong";
+
+// Matches FEE_PAYMENT_MODES in models/FeePayment.js.
+const PAYMENT_MODES = [
+  "Cash",
+  "Cheque",
+  "Swipe machine",
+  "Paytm",
+  "GooglePay",
+  "PhonePay",
+  "OnlineTransfer",
+  "Others",
 ];
 
+// Modes where bank routing details are meaningful proof (as opposed to
+// POS/wallet transaction IDs, which don't have a bank_name/bank_branch).
+const BANK_MODES = ["Cheque", "OnlineTransfer"];
+
+const EMPTY_FORM = {
+  student_id: "",
+  student_name: "",
+  academic_year: getCurrentAcademicYear(),
+  // Three itemized rows, matching collectPayment()'s
+  // rows: [{key: "school_fee"|"admission_fee"|"previous_due", amount}]
+  // contract - these map 1:1 to StudentFeeReport's paid_term_fee /
+  // paid_adm_fee / old_fee. Left blank = that row is skipped entirely.
+  schoolFeeAmount: "",
+  admissionFeeAmount: "",
+  previousDueAmount: "",
+  payment_date: new Date().toISOString().split("T")[0],
+  payment_mode: "Cash",
+  voucher_type: "MvNo",
+  transaction_no: "",
+  cheque_date: "",
+  bank_name: "",
+  bank_branch: "",
+};
+
 export default function BPFees() {
-  const [fees, setFees] = useState([]);
-  const [students, setStudents] = useState([]);
-  const [yearFilter, setYearFilter] = useState("2024-25");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState(EMPTY);
-  const [loading, setLoading] = useState(true);
-  const [selectedClass, setSelectedClass] = useState("");
-  const [remindedIds, setRemindedIds] = useState(new Set());
+  const { user } = useAuth();
   const { toast } = useToast();
 
-  const load = async () => {
-    setLoading(true);
-    const [f, s] = await Promise.all([
-      entities.FeePayment.list("-payment_date"),
-      entities.Student.list(),
-    ]);
-    setFees(f);
-    setStudents(s);
-    setLoading(false);
+  const resolvedBranchId =
+    typeof user?.branch === "object" ? user?.branch?._id : user?.branch;
+
+  const [fees, setFees] = useState([]);
+  const [classes, setClasses] = useState([]);
+  const [eligibleStudents, setEligibleStudents] = useState([]);
+  const [selectedClassId, setSelectedClassId] = useState("");
+  const [feeReport, setFeeReport] = useState(null);
+
+  const [yearFilter, setYearFilter] = useState(getCurrentAcademicYear());
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [remindedIds, setRemindedIds] = useState(new Set());
+
+  // `background: true` is used by the 10s poll below - it refreshes
+  // `fees` in place without touching `loading`, so a silent sync never
+  // blanks the table to a "Loading..." row. Only the first mount shows
+  // the spinner.
+  const load = ({ background = false } = {}) => {
+    if (!background) setLoading(true);
+    feeApi
+      .listPayments()
+      .then((data) => setFees(data?.data || data || []))
+      .catch((err) =>
+        toast({
+          title: "Failed to load fee payments",
+          description: apiErrorMessage(err),
+          variant: "destructive",
+        }),
+      )
+      .finally(() => {
+        if (!background) setLoading(false);
+      });
   };
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 10000); // Sync every 10 seconds
+    const interval = setInterval(() => load({ background: true }), 10000); // Sync every 10 seconds
     return () => clearInterval(interval);
   }, []);
 
+  // Classes scoped to the accounts manager's own branch + current
+  // academic year - no branch picker, since this role only ever
+  // operates within their own branch.
+  useEffect(() => {
+    if (!resolvedBranchId) return;
+    classApi
+      .list()
+      .then((data) => setClasses(data?.data || data || []))
+      .catch((err) =>
+        toast({
+          title: "Failed to load classes",
+          description: apiErrorMessage(err),
+          variant: "destructive",
+        }),
+      );
+  }, [resolvedBranchId]);
+
+  useEffect(() => {
+    if (!selectedClassId) {
+      setEligibleStudents([]);
+      return;
+    }
+    feeApi
+      .listEligibleStudents({ class: selectedClassId })
+      .then((data) => setEligibleStudents(data?.data || data || []))
+      .catch((err) =>
+        toast({
+          title: "Failed to load students",
+          description: apiErrorMessage(err),
+          variant: "destructive",
+        }),
+      );
+  }, [selectedClassId]);
+
+  const needsProof = form.payment_mode !== "Cash";
+  const needsBankDetails = BANK_MODES.includes(form.payment_mode);
+
+  const totalRowsAmount =
+    (Number(form.schoolFeeAmount) || 0) +
+    (Number(form.admissionFeeAmount) || 0) +
+    (Number(form.previousDueAmount) || 0);
+
+  // collectPayment() requires an existing StudentFeeReport id, so unlike
+  // an earlier draft of this page, this is a hard block, not just a
+  // warning - there's nothing to collect a payment against otherwise.
+  const canSave =
+    !!form.student_id &&
+    !!feeReport &&
+    totalRowsAmount > 0 &&
+    (!needsProof || !!form.transaction_no) &&
+    !saving;
+
   const save = async () => {
-    await entities.FeePayment.create({
-      ...form,
-      amount: Number(form.amount),
-    });
-    setShowForm(false);
-    setForm(EMPTY);
-    setSelectedClass("");
-    load();
+    if (!canSave) return;
+    setSaving(true);
+    try {
+      const rows = [];
+      if (Number(form.schoolFeeAmount) > 0)
+        rows.push({ key: "school_fee", amount: Number(form.schoolFeeAmount) });
+      if (Number(form.admissionFeeAmount) > 0)
+        rows.push({
+          key: "admission_fee",
+          amount: Number(form.admissionFeeAmount),
+        });
+      if (Number(form.previousDueAmount) > 0)
+        rows.push({
+          key: "previous_due",
+          amount: Number(form.previousDueAmount),
+        });
+
+      const payload = {
+        student_fee_report_id: feeReport._id,
+        student_id: form.student_id,
+        student_name: form.student_name,
+        academic_year: form.academic_year,
+        payment_date: form.payment_date,
+        voucher_type: form.voucher_type,
+        payment_mode: form.payment_mode,
+        rows,
+      };
+      if (needsProof) payload.transaction_no = form.transaction_no;
+      if (form.payment_mode === "Cheque")
+        payload.cheque_date = form.cheque_date;
+      if (needsBankDetails) {
+        payload.bank_name = form.bank_name;
+        payload.bank_branch = form.bank_branch;
+      }
+
+      await feeApi.collectPayment(payload);
+      toast({
+        title: "Payment recorded",
+        description: `₹${totalRowsAmount.toLocaleString("en-IN")} recorded for ${form.student_name}.`,
+      });
+      closeForm();
+      load();
+    } catch (err) {
+      toast({
+        title: "Failed to save payment",
+        description: apiErrorMessage(err),
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const closeForm = () => {
     setShowForm(false);
-    setForm(EMPTY);
-    setSelectedClass("");
+    setForm(EMPTY_FORM);
+    setSelectedClassId("");
+    setEligibleStudents([]);
+    setFeeReport(null);
   };
+
+  const setField = (key, value) => setForm((f) => ({ ...f, [key]: value }));
 
   const filtered = fees.filter((f) => {
     const my = yearFilter === "All" || f.academic_year === yearFilter;
@@ -109,7 +251,7 @@ export default function BPFees() {
   });
 
   const sendReminder = (fee, bulk = false) => {
-    setRemindedIds((prev) => new Set([...prev, fee.id]));
+    setRemindedIds((prev) => new Set([...prev, fee._id]));
     if (!bulk) {
       toast({
         title: "📢 Reminder Sent",
@@ -134,8 +276,9 @@ export default function BPFees() {
   const totalPending = fees
     .filter((f) => f.status === "Pending")
     .reduce((s, f) => s + (f.amount || 0), 0);
+  const currentYear = getCurrentAcademicYear();
   const pendingStudents = fees.filter(
-    (f) => f.status === "Pending" && f.academic_year === "2024-25",
+    (f) => f.status === "Pending" && f.academic_year === currentYear,
   );
 
   return (
@@ -188,12 +331,12 @@ export default function BPFees() {
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-4 col-span-2 md:col-span-1">
           <p className="text-xs text-slate-500 font-medium mb-1">
-            Pending Students (2024-25)
+            Pending Students ({currentYear})
           </p>
           <div className="space-y-1 mt-2">
             {pendingStudents.slice(0, 5).map((f) => (
               <div
-                key={f.id}
+                key={f._id}
                 className="flex items-center justify-between text-xs"
               >
                 <span className="text-slate-700">{f.student_name}</span>
@@ -212,7 +355,7 @@ export default function BPFees() {
       {/* Year toggle + filter */}
       <div className="flex flex-wrap gap-3 items-center">
         <div className="flex bg-slate-100 rounded-lg p-0.5">
-          {["All", "2023-24", "2024-25"].map((y) => (
+          {["All", currentYear].map((y) => (
             <button
               key={y}
               onClick={() => setYearFilter(y)}
@@ -230,6 +373,7 @@ export default function BPFees() {
             <SelectItem value="All">All</SelectItem>
             <SelectItem value="Paid">Paid</SelectItem>
             <SelectItem value="Pending">Pending</SelectItem>
+            <SelectItem value="Cancelled">Cancelled</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -260,20 +404,20 @@ export default function BPFees() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading && (
+              {loading && fees.length === 0 && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="px-4 py-8 text-center text-slate-400"
                   >
                     Loading...
                   </td>
                 </tr>
               )}
-              {!loading &&
+              {(!loading || fees.length > 0) &&
                 filtered.map((f) => (
                   <tr
-                    key={f.id}
+                    key={f._id}
                     className={`hover:bg-red-50 transition-colors ${f.status === "Pending" ? "bg-red-50 border-l-4 border-l-red-400" : ""}`}
                   >
                     <td className="px-4 py-3 font-mono text-xs text-slate-500">
@@ -294,7 +438,9 @@ export default function BPFees() {
                       ₹{Number(f.amount || 0).toLocaleString("en-IN")}
                     </td>
                     <td className="px-4 py-3 text-slate-500">
-                      {f.payment_date}
+                      {f.payment_date
+                        ? String(f.payment_date).split("T")[0]
+                        : "—"}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       {f.payment_mode}
@@ -307,7 +453,7 @@ export default function BPFees() {
                         <button
                           onClick={() => sendReminder(f)}
                           title="Send fee reminder"
-                          className={`p-1 rounded transition-colors ${remindedIds.has(f.id) ? "text-amber-500 bg-amber-50" : "text-red-400 hover:text-red-600 hover:bg-red-50"}`}
+                          className={`p-1 rounded transition-colors ${remindedIds.has(f._id) ? "text-amber-500 bg-amber-50" : "text-red-400 hover:text-red-600 hover:bg-red-50"}`}
                         >
                           <Bell className="w-4 h-4" />
                         </button>
@@ -325,7 +471,7 @@ export default function BPFees() {
               {!loading && filtered.length === 0 && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="px-4 py-8 text-center text-slate-400"
                   >
                     No records found.
@@ -337,35 +483,45 @@ export default function BPFees() {
         </div>
       </div>
 
-      <Dialog open={showForm} onOpenChange={closeForm}>
-        <DialogContent className="max-w-lg">
+      <Dialog open={showForm} onOpenChange={(open) => !open && closeForm()}>
+        <DialogContent
+          className="max-w-lg max-h-[85vh] overflow-y-auto"
+          onInteractOutside={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle>Add Fee Payment</DialogTitle>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-3 mt-2">
+            {/* Step 1 - Class */}
             <div className="col-span-2">
               <label className="text-xs font-medium text-slate-600 mb-1 block">
                 Class
               </label>
               <Select
-                value={selectedClass}
+                value={selectedClassId}
                 onValueChange={(v) => {
-                  setSelectedClass(v);
-                  setForm({ ...form, student_id: "", student_name: "" });
+                  setSelectedClassId(v);
+                  setForm((f) => ({ ...f, student_id: "", student_name: "" }));
+                  setFeeReport(null);
                 }}
               >
-                <SelectTrigger className="text-sm">
+                <SelectTrigger className="text-sm w-full">
                   <SelectValue placeholder="Select class first" />
                 </SelectTrigger>
                 <SelectContent>
-                  {CLASSES.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
+                  {classes.map((c) => (
+                    <SelectItem key={c._id} value={c._id}>
+                      {["LKG", "UKG"].includes(c.grade)
+                        ? c.grade
+                        : `Class ${c.grade}`}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Step 2 - Student, via listEligibleStudents (Active only,
+                each annotated with whether it already has a fee report) */}
             <div className="col-span-2">
               <label className="text-xs font-medium text-slate-600 mb-1 block">
                 Student
@@ -373,101 +529,297 @@ export default function BPFees() {
               <Select
                 value={form.student_id}
                 onValueChange={(v) => {
-                  const s = students.find((st) => st.id === v);
-                  setForm({
-                    ...form,
+                  const s = eligibleStudents.find((e) => e.student_id === v);
+                  setForm((f) => ({
+                    ...f,
                     student_id: v,
-                    student_name: s?.full_name || "",
-                  });
+                    student_name: s?.name || "",
+                  }));
+                  setFeeReport(s?.existing_report || null);
                 }}
-                disabled={!selectedClass}
+                disabled={!selectedClassId}
               >
-                <SelectTrigger className="text-sm">
+                <SelectTrigger className="text-sm w-full">
                   <SelectValue
                     placeholder={
-                      selectedClass ? "Select student" : "Select class first"
+                      selectedClassId ? "Select student" : "Select class first"
                     }
                   />
                 </SelectTrigger>
                 <SelectContent>
-                  {students
-                    .filter((s) => s.class === selectedClass)
-                    .map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.full_name}
-                      </SelectItem>
-                    ))}
+                  {eligibleStudents.map((s) => (
+                    <SelectItem key={s.student_id} value={s.student_id}>
+                      {s.name}
+                      {!s.has_report ? " (no fee report)" : ""}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
-            {[
-              { label: "Receipt No", key: "receipt_no" },
-              { label: "Amount (₹)", key: "amount", type: "number" },
-              { label: "Payment Date", key: "payment_date", type: "date" },
-            ].map((f) => (
-              <div key={f.key}>
-                <label className="text-xs font-medium text-slate-600 mb-1 block">
-                  {f.label}
-                </label>
-                <Input
-                  type={f.type || "text"}
-                  value={form[f.key]}
-                  onChange={(e) =>
-                    setForm({ ...form, [f.key]: e.target.value })
-                  }
-                  className="text-sm"
-                />
+
+            {/* Step 3 - blocked if this student has no fee report yet,
+                since collectPayment() requires student_fee_report_id */}
+            {form.student_id && !feeReport && (
+              <div className="col-span-2 bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                No fee report found for this student - assign one on the Student
+                Fee Report page before collecting payment.
               </div>
-            ))}
-            {[
-              {
-                label: "Academic Year",
-                key: "academic_year",
-                opts: ["2023-24", "2024-25"],
-              },
-              {
-                label: "Fee Type",
-                key: "fee_type",
-                opts: ["Tuition", "Annual", "Transport", "Exam", "Other"],
-              },
-              {
-                label: "Payment Mode",
-                key: "payment_mode",
-                opts: ["Cash", "Online", "Cheque"],
-              },
-              { label: "Status", key: "status", opts: ["Paid", "Pending"] },
-            ].map((f) => (
-              <div key={f.key}>
-                <label className="text-xs font-medium text-slate-600 mb-1 block">
-                  {f.label}
-                </label>
-                <Select
-                  value={form[f.key]}
-                  onValueChange={(v) => setForm({ ...form, [f.key]: v })}
-                >
-                  <SelectTrigger className="text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {f.opts.map((o) => (
-                      <SelectItem key={o} value={o}>
-                        {o}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ))}
+            )}
+
+            {form.student_id && feeReport && (
+              <>
+                {/* Step 4 - itemized amount per bucket, matching
+                    collectPayment()'s rows contract exactly */}
+                <div className="col-span-2 space-y-3 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Amount Being Paid Now (leave a row blank to skip it)
+                  </p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-xs font-medium text-slate-600 mb-1 block">
+                        School Fee
+                      </label>
+                      <p className="text-[11px] text-slate-400 mb-1">
+                        Balance ₹
+                        {(feeReport.balance_term_fee || 0).toLocaleString(
+                          "en-IN",
+                        )}
+                      </p>
+                      <Input
+                        type="number"
+                        value={form.schoolFeeAmount}
+                        onChange={(e) =>
+                          setField("schoolFeeAmount", e.target.value)
+                        }
+                        className="text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600 mb-1 block">
+                        Admission Fee
+                      </label>
+                      <p className="text-[11px] text-slate-400 mb-1">
+                        Balance ₹
+                        {(feeReport.balance_adm_fee || 0).toLocaleString(
+                          "en-IN",
+                        )}
+                      </p>
+                      <Input
+                        type="number"
+                        value={form.admissionFeeAmount}
+                        onChange={(e) =>
+                          setField("admissionFeeAmount", e.target.value)
+                        }
+                        className="text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600 mb-1 block">
+                        Previous Due
+                      </label>
+                      <p className="text-[11px] text-slate-400 mb-1">
+                        ₹{(feeReport.old_fee || 0).toLocaleString("en-IN")}
+                      </p>
+                      <Input
+                        type="number"
+                        value={form.previousDueAmount}
+                        onChange={(e) =>
+                          setField("previousDueAmount", e.target.value)
+                        }
+                        className="text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Step 5 - Voucher type */}
+                <div>
+                  <label className="text-xs font-medium text-slate-600 mb-1 block">
+                    Voucher Type
+                  </label>
+                  <Select
+                    value={form.voucher_type}
+                    onValueChange={(v) => setField("voucher_type", v)}
+                  >
+                    <SelectTrigger className="text-sm w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="MvNo">MV No.</SelectItem>
+                      <SelectItem value="CvNo">CV No.</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Step 6 - Payment mode */}
+                <div>
+                  <label className="text-xs font-medium text-slate-600 mb-1 block">
+                    Payment Mode
+                  </label>
+                  <Select
+                    value={form.payment_mode}
+                    onValueChange={(v) =>
+                      setForm((f) => ({
+                        ...f,
+                        payment_mode: v,
+                        transaction_no: "",
+                        cheque_date: "",
+                        bank_name: "",
+                        bank_branch: "",
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="text-sm w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PAYMENT_MODES.map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-slate-600 mb-1 block">
+                    Payment Date
+                  </label>
+                  <Input
+                    type="date"
+                    value={form.payment_date}
+                    onChange={(e) => setField("payment_date", e.target.value)}
+                    className="text-sm"
+                  />
+                </div>
+
+                {/* Step 7 - proof, conditional on mode */}
+                {form.payment_mode === "Cheque" && (
+                  <>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600 mb-1 block">
+                        Cheque Number
+                      </label>
+                      <Input
+                        value={form.transaction_no}
+                        onChange={(e) =>
+                          setField("transaction_no", e.target.value)
+                        }
+                        className="text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600 mb-1 block">
+                        Cheque Date
+                      </label>
+                      <Input
+                        type="date"
+                        value={form.cheque_date}
+                        onChange={(e) =>
+                          setField("cheque_date", e.target.value)
+                        }
+                        className="text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600 mb-1 block">
+                        Bank Name
+                      </label>
+                      <Input
+                        value={form.bank_name}
+                        onChange={(e) => setField("bank_name", e.target.value)}
+                        className="text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600 mb-1 block">
+                        Bank Branch
+                      </label>
+                      <Input
+                        value={form.bank_branch}
+                        onChange={(e) =>
+                          setField("bank_branch", e.target.value)
+                        }
+                        className="text-sm"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {form.payment_mode === "OnlineTransfer" && (
+                  <>
+                    <div className="col-span-2">
+                      <label className="text-xs font-medium text-slate-600 mb-1 block">
+                        Transaction ID
+                      </label>
+                      <Input
+                        value={form.transaction_no}
+                        onChange={(e) =>
+                          setField("transaction_no", e.target.value)
+                        }
+                        className="text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600 mb-1 block">
+                        Bank Name
+                      </label>
+                      <Input
+                        value={form.bank_name}
+                        onChange={(e) => setField("bank_name", e.target.value)}
+                        className="text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600 mb-1 block">
+                        Bank Branch
+                      </label>
+                      <Input
+                        value={form.bank_branch}
+                        onChange={(e) =>
+                          setField("bank_branch", e.target.value)
+                        }
+                        className="text-sm"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {[
+                  "Swipe machine",
+                  "Paytm",
+                  "GooglePay",
+                  "PhonePay",
+                  "Others",
+                ].includes(form.payment_mode) && (
+                  <div className="col-span-2">
+                    <label className="text-xs font-medium text-slate-600 mb-1 block">
+                      Transaction ID / Reference No.
+                    </label>
+                    <Input
+                      value={form.transaction_no}
+                      onChange={(e) =>
+                        setField("transaction_no", e.target.value)
+                      }
+                      className="text-sm"
+                    />
+                  </div>
+                )}
+              </>
+            )}
           </div>
           <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline" onClick={closeForm}>
+            <Button variant="outline" onClick={closeForm} disabled={saving}>
               Cancel
             </Button>
             <Button
               onClick={save}
+              disabled={!canSave}
               className="bg-emerald-600 hover:bg-emerald-700 text-white"
             >
-              Save
+              {saving ? "Saving..." : "Save"}
             </Button>
           </div>
         </DialogContent>

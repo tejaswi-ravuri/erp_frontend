@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
-import { entities } from "@/api/entityClient";
-import { Plus } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import { expenditureApi } from "@/api/api";
+import { toast } from "sonner";
+import { Plus, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -16,7 +17,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import StatusBadge from "@/components/bp/StatusBadge";
 import {
   PieChart,
   Pie,
@@ -26,140 +26,246 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
+// Matches Expenditure.category exactly (see models/Expenditure.js) -
+// your real expenditure ledger chart of accounts, not the old 6-value
+// placeholder.
 const CATEGORIES = [
-  "Salaries",
-  "Utilities",
-  "Maintenance",
-  "Supplies",
-  "Events",
-  "Misc",
+  "Abacus/Vedic Maths Bills",
+  "Admission Incentives",
+  "Advertisements",
+  "Bank Deposits",
+  "Branch Visiting Allowance",
+  "Building Repairs and Maintenance",
+  "Building-I Rent",
+  "Building-II Rent",
+  "Bus Diesel",
+  "Bus EMI-I",
+  "Bus EMI-II",
+  "Bus Fitness and Permit",
+  "Bus Insurance",
+  "Bus Repairs and Maintenance",
+  "Bus Tax",
+  "Chit Payments",
+  "Class Room Furniture Bills",
+  "Consultancy Bills",
+  "DCEB Expenses",
+  "Donations and Charities",
+  "Drinking Water Bills",
+  "Electricity Bills",
+  "Electrical Equipments",
+  "Electrical Repairs and Maintenance",
+  "ERP AMC",
+  "Functions and Celebrations",
+  "Furniture Repairs and Maintenance",
+  "Ground Rent",
+  "Hire Vehicle Bills",
+  "Housekeeping Bills",
+  "ID/Badges Bills",
+  "Interest on Loans",
+  "Loans Repayments",
+  "Look and Feel Bills",
+  "Magazine Bills",
+  "Management Fee",
+  "Mobile and Internet Bills",
+  "Municipal Water Bills",
+  "Note Books Bills",
+  "Office Furniture Bills",
+  "Office Records Bills",
+  "Other Miscellaneous Bills",
+  "PF & ESI Payments",
+  "Picnic and Tours Expenses",
+  "Printing and Stationary Bills",
+  "Profit Share",
+  "Property Tax Bills",
+  "Question Papers Bills",
+  "Recognition Express",
+  "Regular Uniform Bills",
+  "Salaries and Wages",
+  "School Activity Bills",
+  "School Maintenance",
+  "Sports Uniform Bills",
+  "SSC Exam Fee Expenses",
+  "Staff Welfare Bills",
+  "Stationary Bills",
+  "Student Diaries Bills",
+  "Study and IIT Material Bills",
+  "TDS Payments",
+  "Text Books Bills",
+  "Tie and Belts Bills",
+  "Training Program Expenses",
+  "Transport and Courier Expenses",
+  "Travelling Allowance",
 ];
-const CAT_COLORS = {
-  Salaries: "#6366f1",
-  Utilities: "#0ea5e9",
-  Maintenance: "#f59e0b",
-  Supplies: "#10b981",
-  Events: "#ec4899",
-  Misc: "#94a3b8",
-};
-const EMPTY = {
-  category: "Salaries",
+const today = new Date().toISOString().split("T")[0];
+
+const EMPTY_FORM = {
+  category: "Salaries and Wages",
   description: "",
   amount: "",
-  date: new Date().toISOString().split("T")[0],
+  date: today,
   paid_to: "",
-  approved_by: "",
 };
 
-export default function BPExpenditure() {
-  const [items, setItems] = useState([]);
-  const [catFilter, setCatFilter] = useState("All");
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState(EMPTY);
-  const [loading, setLoading] = useState(true);
+// With 65 possible categories, a handful of hardcoded hex colors (as in
+// the smaller reference version) doesn't scale - only categories that
+// actually have data get a slice, and each gets an evenly-spaced hue so
+// colors stay visually distinct regardless of how many show up.
+function colorForIndex(i, total) {
+  const hue = Math.round((360 / Math.max(total, 1)) * i);
+  return `hsl(${hue}, 65%, 55%)`;
+}
 
-  const load = async () => {
+const apiErrorMessage = (err) =>
+  err?.response?.data?.message ||
+  err?.response?.data?.error ||
+  err?.message ||
+  "Something went wrong";
+
+export default function BPExpenditure() {
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState("All");
+
+  const load = () => {
     setLoading(true);
-    const data = await entities.Expenditure.list("-date");
-    setItems(data);
-    setLoading(false);
+    expenditureApi
+      .list({ sort: "-date" })
+      .then(setRecords)
+      .catch((err) => toast.error(apiErrorMessage(err)))
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => {
     load();
   }, []);
 
+  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
   const save = async () => {
-    await entities.Expenditure.create({
-      ...form,
-      amount: Number(form.amount),
-    });
-    setShowForm(false);
-    setForm(EMPTY);
-    load();
+    if (!form.amount || !form.date) {
+      toast.error("Amount and Date are required.");
+      return;
+    }
+    setSaving(true);
+    try {
+      // approved_by is intentionally NOT sent - the backend sets it from
+      // the logged-in user (it's a User reference, not free text).
+      await expenditureApi.create({ ...form, amount: parseFloat(form.amount) });
+      toast.success("Expenditure recorded successfully.");
+      setForm({ ...EMPTY_FORM });
+      setShowForm(false);
+      load();
+    } catch (err) {
+      toast.error(apiErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const filtered =
-    catFilter === "All" ? items : items.filter((i) => i.category === catFilter);
+    categoryFilter === "All"
+      ? records
+      : records.filter((r) => r.category === categoryFilter);
+  const total = filtered.reduce((sum, r) => sum + (r.amount || 0), 0);
 
-  // Category totals for pie chart
-  const catTotals = CATEGORIES.map((cat) => ({
-    name: cat,
-    value: items
-      .filter((i) => i.category === cat)
-      .reduce((s, i) => s + (i.amount || 0), 0),
-  })).filter((c) => c.value > 0);
-
-  const total = items.reduce((s, i) => s + (i.amount || 0), 0);
+  // Only categories with actual spend get a pie slice - with 65 possible
+  // categories, showing all of them (mostly at zero) would be useless.
+  const catTotals = useMemo(() => {
+    const byCategory = {};
+    for (const r of records) {
+      byCategory[r.category] = (byCategory[r.category] || 0) + (r.amount || 0);
+    }
+    return Object.entries(byCategory)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [records]);
 
   return (
-    <div className="space-y-5">
+    <div className="p-6 space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold text-slate-800">Expenditure</h2>
-          <p className="text-sm text-slate-500">
-            Total: ₹{total.toLocaleString("en-IN")}
-          </p>
+          <p className="text-sm text-slate-500">{records.length} records</p>
         </div>
         <Button
           onClick={() => setShowForm(true)}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm gap-1.5"
+          className="bg-red-600 hover:bg-red-700 gap-1.5"
         >
-          <Plus className="w-4 h-4" /> Add Entry
+          <Plus className="w-4 h-4" /> Add Expenditure
         </Button>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-5">
-        {/* Pie Chart */}
+        {/* Category breakdown */}
         <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <h3 className="text-sm font-semibold text-slate-700 mb-3">
+          <h3 className="text-sm font-semibold text-slate-700 mb-1">
             Category Breakdown
           </h3>
+          <p className="text-xl font-bold text-red-600 mb-3">
+            ₹{total.toLocaleString("en-IN")}
+          </p>
           {catTotals.length > 0 ? (
-            <ResponsiveContainer width="100%" height={200}>
+            <ResponsiveContainer width="100%" height={180}>
               <PieChart>
                 <Pie
                   data={catTotals}
                   cx="50%"
                   cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
+                  innerRadius={45}
+                  outerRadius={75}
                   dataKey="value"
                   paddingAngle={2}
                 >
-                  {catTotals.map((entry) => (
+                  {catTotals.map((entry, i) => (
                     <Cell
                       key={entry.name}
-                      fill={CAT_COLORS[entry.name] || "#94a3b8"}
+                      fill={colorForIndex(i, catTotals.length)}
                     />
                   ))}
                 </Pie>
-                <Tooltip formatter={(v) => `₹${v.toLocaleString("en-IN")}`} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Tooltip
+                  formatter={(v) => `₹${Number(v).toLocaleString("en-IN")}`}
+                />
               </PieChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-sm text-slate-400 text-center py-8">No data</p>
+            <p className="text-sm text-slate-400 text-center py-8">
+              No data yet
+            </p>
           )}
-          <div className="mt-2 space-y-1">
-            {catTotals.map((c) => (
-              <div key={c.name} className="flex justify-between text-xs">
-                <span className="text-slate-600">{c.name}</span>
-                <span className="font-medium text-slate-800">
+          <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+            {catTotals.slice(0, 10).map((c, i) => (
+              <div key={c.name} className="flex justify-between text-xs gap-2">
+                <span className="text-slate-600 flex items-center gap-1.5 truncate">
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ background: colorForIndex(i, catTotals.length) }}
+                  />
+                  <span className="truncate">{c.name}</span>
+                </span>
+                <span className="font-medium text-slate-800 shrink-0">
                   ₹{c.value.toLocaleString("en-IN")}
                 </span>
               </div>
             ))}
+            {catTotals.length > 10 && (
+              <p className="text-xs text-slate-400 pt-1">
+                +{catTotals.length - 10} more categories
+              </p>
+            )}
           </div>
         </div>
 
         {/* Table */}
         <div className="lg:col-span-2 space-y-3">
-          <Select value={catFilter} onValueChange={setCatFilter}>
-            <SelectTrigger className="w-40 text-sm">
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-56 text-sm">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="max-h-64 overflow-y-auto">
               <SelectItem value="All">All Categories</SelectItem>
               {CATEGORIES.map((c) => (
                 <SelectItem key={c} value={c}>
@@ -178,8 +284,9 @@ export default function BPExpenditure() {
                       "Date",
                       "Category",
                       "Description",
-                      "Amount",
                       "Paid To",
+                      "Approved By",
+                      "Amount",
                     ].map((h) => (
                       <th
                         key={h}
@@ -194,51 +301,54 @@ export default function BPExpenditure() {
                   {loading && (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={6}
                         className="px-4 py-8 text-center text-slate-400"
                       >
                         Loading...
                       </td>
                     </tr>
                   )}
-                  {!loading &&
-                    filtered.map((item) => (
-                      <tr key={item.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 text-slate-500">
-                          {item.date}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className="px-2 py-0.5 rounded-full text-xs font-medium"
-                            style={{
-                              background: CAT_COLORS[item.category] + "20",
-                              color: CAT_COLORS[item.category],
-                            }}
-                          >
-                            {item.category}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-slate-700">
-                          {item.description}
-                        </td>
-                        <td className="px-4 py-3 font-semibold text-slate-800">
-                          ₹{Number(item.amount || 0).toLocaleString("en-IN")}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {item.paid_to}
-                        </td>
-                      </tr>
-                    ))}
                   {!loading && filtered.length === 0 && (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={6}
                         className="px-4 py-8 text-center text-slate-400"
                       >
-                        No entries found.
+                        No expenditure recorded yet.
                       </td>
                     </tr>
                   )}
+                  {!loading &&
+                    filtered.map((r) => (
+                      <tr key={r._id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 text-slate-500">
+                          {r.date
+                            ? new Date(r.date).toLocaleDateString("en-IN", {
+                                day: "2-digit",
+                                month: "short",
+                                year: "numeric",
+                              })
+                            : "—"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-600">
+                            {r.category}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 max-w-xs truncate">
+                          {r.description || "—"}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {r.paid_to || "—"}
+                        </td>
+                        <td className="px-4 py-3 text-slate-500">
+                          {r.approved_by?.full_name || "—"}
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-red-600">
+                          ₹{Number(r.amount || 0).toLocaleString("en-IN")}
+                        </td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             </div>
@@ -247,23 +357,23 @@ export default function BPExpenditure() {
       </div>
 
       <Dialog open={showForm} onOpenChange={setShowForm}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Add Expenditure</DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-3 mt-2">
+          <div className="grid grid-cols-2 gap-4 mt-2">
             <div className="col-span-2">
               <label className="text-xs font-medium text-slate-600 mb-1 block">
-                Category
+                Category *
               </label>
               <Select
                 value={form.category}
-                onValueChange={(v) => setForm({ ...form, category: v })}
+                onValueChange={(v) => set("category", v)}
               >
                 <SelectTrigger className="text-sm">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-64 overflow-y-auto">
                   {CATEGORIES.map((c) => (
                     <SelectItem key={c} value={c}>
                       {c}
@@ -272,27 +382,51 @@ export default function BPExpenditure() {
                 </SelectContent>
               </Select>
             </div>
-            {[
-              { label: "Description", key: "description" },
-              { label: "Amount (₹)", key: "amount", type: "number" },
-              { label: "Date", key: "date", type: "date" },
-              { label: "Paid To", key: "paid_to" },
-              { label: "Approved By", key: "approved_by" },
-            ].map((f) => (
-              <div key={f.key}>
-                <label className="text-xs font-medium text-slate-600 mb-1 block">
-                  {f.label}
-                </label>
-                <Input
-                  type={f.type || "text"}
-                  value={form[f.key]}
-                  onChange={(e) =>
-                    setForm({ ...form, [f.key]: e.target.value })
-                  }
-                  className="text-sm"
-                />
-              </div>
-            ))}
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Amount (₹) *
+              </label>
+              <Input
+                type="number"
+                value={form.amount}
+                onChange={(e) => set("amount", e.target.value)}
+                placeholder="0"
+                className="text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Date *
+              </label>
+              <Input
+                type="date"
+                value={form.date}
+                onChange={(e) => set("date", e.target.value)}
+                className="text-sm"
+              />
+            </div>
+            <div className="col-span-2">
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Paid To
+              </label>
+              <Input
+                value={form.paid_to}
+                onChange={(e) => set("paid_to", e.target.value)}
+                placeholder="Payee name"
+                className="text-sm"
+              />
+            </div>
+            <div className="col-span-2">
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                Description
+              </label>
+              <textarea
+                value={form.description}
+                onChange={(e) => set("description", e.target.value)}
+                rows={3}
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-300 resize-none"
+              />
+            </div>
           </div>
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="outline" onClick={() => setShowForm(false)}>
@@ -300,9 +434,16 @@ export default function BPExpenditure() {
             </Button>
             <Button
               onClick={save}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              disabled={saving}
+              className="bg-red-600 hover:bg-red-700 text-white gap-1.5"
             >
-              Save
+              {saving ? (
+                "Saving..."
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4" /> Save Expenditure
+                </>
+              )}
             </Button>
           </div>
         </DialogContent>

@@ -1,6 +1,6 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import * as XLSX from "xlsx";
-import { entities } from "@/api/entityClient";
+import { studentApi } from "@/api/api";
 import {
   Dialog,
   DialogContent,
@@ -10,46 +10,111 @@ import {
 import { Button } from "@/components/ui/button";
 import { Upload, Download, CheckCircle2, AlertCircle } from "lucide-react";
 
+// Every column here maps to a real field on the Student schema (see
+// models/Student.js + models/_addressSchema.js). The old template had
+// columns with no backing field at all - Uniq-id, Mother name/mobile
+// (Student only has one parent_name/parent_phone pair, not a second
+// parent), Adhar Number, Caste, and a split Communication/Permanent
+// Address (schema only has one `address`) - those have been dropped since
+// anything typed into them was silently discarded on save.
 const TEMPLATE_HEADERS = [
-  "Uniq-id",
-  "Student name",
+  "Admission No",
+  "Student Name",
   "Class",
-  "Section",
-  "Roll.no",
-  "Admission ID",
-  "Father name",
-  "Father mobile number",
-  "Mother name",
-  "Mother mobile number",
-  "Year of joining",
-  "Adhar Number",
+  "Roll No",
   "Gender",
   "Date of Birth",
-  "Caste",
-  "Communication Address",
-  "Permanent Address",
+  "Blood Group",
+  "Parent Name",
+  "Parent Phone",
+  "Parent Email",
+  "Joining Date",
+  "Status",
+  "Address Line 1",
+  "Address Line 2",
+  "City",
+  "District",
+  "State",
+  "Pincode",
+  "Country",
 ];
 
-const REQUIRED_FIELDS = ["Student name", "Class"];
+// admission_no, full_name, and class are required at the Student level.
+// Address subfields are only required if an address is being provided at
+// all - Student.address itself defaults to null (see models/Student.js).
+const REQUIRED_FIELDS = ["Admission No", "Student Name", "Class"];
+const ADDRESS_HEADERS = [
+  "Address Line 1",
+  "Address Line 2",
+  "City",
+  "District",
+  "State",
+  "Pincode",
+  "Country",
+];
+const REQUIRED_ADDRESS_FIELDS = ["Address Line 1", "City", "State", "Pincode"];
 
-// Maps sheet column headers to the actual Student schema field names.
-// Columns not listed here (Uniq-id, Mother name, Mother mobile number,
-// Adhar Number, Caste, Permanent Address, Year of joining) have no home
-// in the current schema and are dropped rather than silently mis-saved.
 const HEADER_FIELD_MAP = {
-  "Student name": "full_name",
-  Class: "class",
-  Section: "section",
-  "Roll.no": "roll_no",
-  "Admission ID": "admission_no",
-  "Father name": "parent_name",
-  "Father mobile number": "parent_phone",
+  "Student Name": "full_name",
+  "Roll No": "roll_no",
+  "Admission No": "admission_no",
+  "Parent Name": "parent_name",
+  "Parent Phone": "parent_phone",
+  "Parent Email": "parent_email",
   Gender: "gender",
   "Date of Birth": "dob",
-  "Communication Address": "address",
+  "Joining Date": "joining_date",
 };
 
-export default function StudentBulkUpload({ open, onClose, onUploaded }) {
+const ADDRESS_FIELD_MAP = {
+  "Address Line 1": "line1",
+  "Address Line 2": "line2",
+  City: "city",
+  District: "district",
+  State: "state",
+  Pincode: "pincode",
+  Country: "country",
+};
+
+const GENDER_VALUES = ["Male", "Female", "Other"];
+const BLOOD_GROUP_VALUES = ["A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"];
+const STATUS_VALUES = [
+  "Active",
+  "Inactive",
+  "Graduated",
+  "Transferred Out",
+  "Dropped Out",
+  "On Leave",
+  "Alumni",
+];
+const PINCODE_RE = /^[1-9][0-9]{5}$/;
+
+// Sheet values like "Class 5", "Grade 5", or bare "5"/"LKG" all resolve
+// against the real Class docs — case-insensitive, prefix-agnostic.
+const normalizeGradeLabel = (raw) =>
+  String(raw ?? "")
+    .replace(/^(class|grade)\s*/i, "")
+    .trim()
+    .toUpperCase();
+
+// Case/space-insensitive match against a fixed enum list, e.g. "a +" or
+// "AB -" both resolve to "AB-".
+const matchEnum = (raw, values) => {
+  const norm = String(raw ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+  return (
+    values.find((v) => v.toUpperCase().replace(/\s+/g, "") === norm) || null
+  );
+};
+
+export default function StudentBulkUpload({
+  open,
+  onClose,
+  onUploaded,
+  classes,
+}) {
   const [fileName, setFileName] = useState("");
   const [validRows, setValidRows] = useState([]);
   const [validCount, setValidCount] = useState(0);
@@ -60,6 +125,14 @@ export default function StudentBulkUpload({ open, onClose, onUploaded }) {
   const [successCount, setSuccessCount] = useState(0);
   const [uploadErrors, setUploadErrors] = useState([]);
   const fileRef = useRef();
+
+  const classByGrade = useMemo(() => {
+    const map = {};
+    (classes || []).forEach((c) => {
+      map[c.grade.toUpperCase()] = c;
+    });
+    return map;
+  }, [classes]);
 
   const reset = () => {
     setFileName("");
@@ -105,25 +178,77 @@ export default function StudentBulkUpload({ open, onClose, onUploaded }) {
         const raw = {};
         TEMPLATE_HEADERS.forEach((h) => {
           let val = row[h];
-          // Normalize date fields before stringifying, so real Date
-          // objects (from cellDates: true) don't get turned into a
-          // JS Date.toString() blob first.
           if (val instanceof Date) val = val.toISOString().split("T")[0];
           raw[h] = String(val ?? "").trim();
         });
 
+        const rowErrors = [];
+
         const missing = REQUIRED_FIELDS.filter((f) => !raw[f]);
         if (missing.length > 0) {
-          errs.push(`Row ${i + 2}: missing ${missing.join(", ")}`);
+          rowErrors.push(`missing ${missing.join(", ")}`);
+        }
+
+        const matchedClass = raw["Class"]
+          ? classByGrade[normalizeGradeLabel(raw["Class"])]
+          : null;
+        if (raw["Class"] && !matchedClass) {
+          rowErrors.push(`no matching class for "${raw["Class"]}"`);
+        }
+
+        let gender = null;
+        if (raw["Gender"]) {
+          gender = matchEnum(raw["Gender"], GENDER_VALUES);
+          if (!gender) rowErrors.push(`invalid Gender "${raw["Gender"]}"`);
+        }
+
+        let bloodGroup = null;
+        if (raw["Blood Group"]) {
+          bloodGroup = matchEnum(raw["Blood Group"], BLOOD_GROUP_VALUES);
+          if (!bloodGroup)
+            rowErrors.push(`invalid Blood Group "${raw["Blood Group"]}"`);
+        }
+
+        let status = "Active";
+        if (raw["Status"]) {
+          const matched = matchEnum(raw["Status"], STATUS_VALUES);
+          if (!matched) rowErrors.push(`invalid Status "${raw["Status"]}"`);
+          else status = matched;
+        }
+
+        // Address is a structured subdocument, not free text - and it's
+        // only required at all if any address column was filled in.
+        const addressGiven = ADDRESS_HEADERS.some((h) => raw[h]);
+        let address = null;
+        if (addressGiven) {
+          const missingAddr = REQUIRED_ADDRESS_FIELDS.filter((f) => !raw[f]);
+          if (missingAddr.length > 0) {
+            rowErrors.push(`address missing ${missingAddr.join(", ")}`);
+          } else if (!PINCODE_RE.test(raw["Pincode"])) {
+            rowErrors.push(`invalid Pincode "${raw["Pincode"]}"`);
+          } else {
+            address = {};
+            ADDRESS_HEADERS.forEach((h) => {
+              if (raw[h]) address[ADDRESS_FIELD_MAP[h]] = raw[h];
+            });
+          }
+        }
+
+        if (rowErrors.length > 0) {
+          errs.push(`Row ${i + 2}: ${rowErrors.join("; ")}`);
           return;
         }
 
-        // Translate sheet headers into the field names the Student
-        // schema actually expects before this row is sent to the API.
         const mapped = {};
         Object.entries(HEADER_FIELD_MAP).forEach(([header, field]) => {
           if (raw[header]) mapped[field] = raw[header];
         });
+        mapped.class = matchedClass._id;
+        mapped.status = status;
+        if (gender) mapped.gender = gender;
+        if (bloodGroup) mapped.blood_group = bloodGroup;
+        if (address) mapped.address = address;
+
         valid.push(mapped);
       });
 
@@ -138,24 +263,25 @@ export default function StudentBulkUpload({ open, onClose, onUploaded }) {
 
   const handleUpload = async () => {
     setUploading(true);
-    let count = 0;
-    const failMsgs = [];
-    for (const row of validRows) {
-      try {
-        await entities.Student.create(row);
-        count++;
-      } catch (err) {
-        const msg =
-          err?.response?.data?.message ||
-          err?.response?.data?.error ||
-          err?.message ||
-          "Unknown error";
-        console.error("Failed to create student row:", row, err);
-        if (failMsgs.length < 5) failMsgs.push(msg);
-      }
+    try {
+      // One batch call - the backend uses Student.insertMany with
+      // ordered:false, so a single bad row doesn't block the rest, and
+      // the response reports created vs failed counts with per-row
+      // reasons instead of needing N sequential requests from here.
+      const res = await studentApi.bulkCreate(validRows);
+      setSuccessCount(res.created ?? 0);
+      setUploadErrors(
+        (res.errors || []).slice(0, 5).map((e) => e.message || String(e)),
+      );
+    } catch (err) {
+      const msg =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message ||
+        "Unknown error";
+      setSuccessCount(0);
+      setUploadErrors([msg]);
     }
-    setSuccessCount(count);
-    setUploadErrors(failMsgs);
     setUploading(false);
     setDone(true);
     onUploaded();
@@ -202,7 +328,6 @@ export default function StudentBulkUpload({ open, onClose, onUploaded }) {
           </div>
         ) : (
           <div className="space-y-5 mt-2">
-            {/* Step 1 */}
             <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
               <p className="text-sm font-semibold text-slate-700 mb-2">
                 Step 1 — Download the template
@@ -221,7 +346,6 @@ export default function StudentBulkUpload({ open, onClose, onUploaded }) {
               </Button>
             </div>
 
-            {/* Step 2 */}
             <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
               <p className="text-sm font-semibold text-slate-700 mb-2">
                 Step 2 — Upload your filled file
@@ -251,7 +375,6 @@ export default function StudentBulkUpload({ open, onClose, onUploaded }) {
               )}
             </div>
 
-            {/* Validation summary (no row-by-row table) */}
             {hasFile && (
               <div className="space-y-2">
                 <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-center gap-2">

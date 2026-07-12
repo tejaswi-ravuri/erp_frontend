@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { entities } from "@/api/entityClient";
-import { analyticsApi } from "@/api/analyticsApi";
+import { marksApi, attendanceApi, classApi } from "@/api/api";
 import {
   BarChart,
   Bar,
@@ -15,6 +14,9 @@ import {
 } from "recharts";
 import { TrendingUp, Users, ClipboardCheck } from "lucide-react";
 
+// Class model only has `grade` (no separate `section`) — see models/Class.js.
+const classLabel = (c) => (c ? `Class ${c.grade}` : "—");
+
 export default function BPAnalytics() {
   const [classPerf, setClassPerf] = useState([]);
   const [attendanceTrend, setAttendanceTrend] = useState([]);
@@ -22,28 +24,39 @@ export default function BPAnalytics() {
 
   useEffect(() => {
     Promise.all([
-      entities.Marks.list(),
-      entities.Attendance.list("-date", 500),
-    ]).then(([marks, attendance]) => {
+      marksApi.list(),
+      attendanceApi.list({ sort: "-date", limit: 500 }),
+      classApi.list(),
+    ]).then(([marks, attendance, classes]) => {
+      const classesById = Object.fromEntries(
+        (Array.isArray(classes) ? classes : []).map((c) => [c._id, c]),
+      );
+
       // --- Class Performance: avg marks per class ---
+      // Marks.class is a real Class reference (an ObjectId), not a
+      // readable string like "Class 5" - see models/Marks.js. Group by
+      // the id, then resolve the label + sort order from the actual
+      // Class doc (grade_order is computed server-side for exactly this).
       const classMap = {};
       marks.forEach((m) => {
-        if (!m.class || !m.marks_obtained || !m.max_marks) return;
-        if (!classMap[m.class])
-          classMap[m.class] = { total: 0, max: 0, count: 0 };
-        classMap[m.class].total += m.marks_obtained;
-        classMap[m.class].max += m.max_marks;
-        classMap[m.class].count += 1;
+        const classId = m.class?._id || m.class;
+        if (!classId || !m.marks_obtained || !m.max_marks) return;
+        if (!classMap[classId])
+          classMap[classId] = { total: 0, max: 0, count: 0 };
+        classMap[classId].total += m.marks_obtained;
+        classMap[classId].max += m.max_marks;
+        classMap[classId].count += 1;
       });
       const perfData = Object.entries(classMap)
-        .map(([cls, v]) => ({
-          class: cls,
-          avgPercent: Math.round((v.total / v.max) * 100),
-        }))
-        .sort((a, b) => {
-          const num = (s) => parseInt(s.replace(/\D/g, "")) || 0;
-          return num(a.class) - num(b.class);
-        });
+        .map(([classId, v]) => {
+          const cls = classesById[classId];
+          return {
+            class: classLabel(cls),
+            gradeOrder: cls?.grade_order ?? 999,
+            avgPercent: Math.round((v.total / v.max) * 100),
+          };
+        })
+        .sort((a, b) => a.gradeOrder - b.gradeOrder);
       setClassPerf(perfData);
 
       // --- Attendance Trend: last 14 days present % ---
@@ -56,7 +69,11 @@ export default function BPAnalytics() {
 
       const trendData = days
         .map((date) => {
-          const dayRecs = attendance.filter((a) => a.date === date);
+          // Normalize both sides to YYYY-MM-DD - a.date may come back as
+          // a full ISO timestamp rather than a bare date string.
+          const dayRecs = attendance.filter(
+            (a) => String(a.date).slice(0, 10) === date,
+          );
           const total = dayRecs.length;
           const present = dayRecs.filter((a) => a.status === "Present").length;
           return {
