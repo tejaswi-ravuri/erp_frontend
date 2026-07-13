@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Search, UserPlus, CheckCircle2, X, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -18,15 +19,75 @@ const apiErrorMessage = (err) =>
   err?.message ||
   "Something went wrong";
 
+// Each bucket's opt-in flag + its gross/concession/paid field names -
+// mirrors FEE_BUCKETS in feeController.js so the checkbox toggle and the
+// backend's own zero-out-when-disabled sanitization can't drift apart.
+const FEE_BUCKETS = [
+  {
+    key: "admission",
+    flag: "has_admission_fee",
+    label: "Admission Fee",
+    gross: "adm_gross_fee",
+    concession: "adm_concession",
+    paid: "paid_adm_fee",
+  },
+  {
+    key: "term",
+    flag: "has_term_fee",
+    label: "Term Fee",
+    gross: "gross_term_fee",
+    concession: "term_concession",
+    paid: "paid_term_fee",
+  },
+  {
+    key: "transport",
+    flag: "has_transport_fee",
+    label: "Transport Fee",
+    gross: "transport_gross_fee",
+    concession: "transport_concession",
+    paid: "paid_transport_fee",
+  },
+  {
+    key: "application",
+    flag: "has_application_fee",
+    label: "Application Fee",
+    gross: "application_gross_fee",
+    concession: "application_concession",
+    paid: "paid_application_fee",
+  },
+  {
+    key: "registration",
+    flag: "has_registration_fee",
+    label: "Registration Fee",
+    gross: "registration_gross_fee",
+    concession: "registration_concession",
+    paid: "paid_registration_fee",
+  },
+];
+
 const emptyFeeFields = {
   student_type: "New",
   old_fee: 0,
+  has_admission_fee: true,
   adm_gross_fee: 0,
   adm_concession: 0,
   paid_adm_fee: 0,
+  has_term_fee: true,
   gross_term_fee: 0,
   term_concession: 0,
   paid_term_fee: 0,
+  has_transport_fee: false,
+  transport_gross_fee: 0,
+  transport_concession: 0,
+  paid_transport_fee: 0,
+  has_application_fee: false,
+  application_gross_fee: 0,
+  application_concession: 0,
+  paid_application_fee: 0,
+  has_registration_fee: false,
+  registration_gross_fee: 0,
+  registration_concession: 0,
+  paid_registration_fee: 0,
   remarks: "",
   status: "Active",
 };
@@ -34,12 +95,26 @@ const emptyFeeFields = {
 const feeFieldsFromRecord = (r) => ({
   student_type: r.student_type,
   old_fee: r.old_fee || 0,
+  has_admission_fee: r.has_admission_fee ?? true,
   adm_gross_fee: r.adm_gross_fee || 0,
   adm_concession: r.adm_concession || 0,
   paid_adm_fee: r.paid_adm_fee || 0,
+  has_term_fee: r.has_term_fee ?? true,
   gross_term_fee: r.gross_term_fee || 0,
   term_concession: r.term_concession || 0,
   paid_term_fee: r.paid_term_fee || 0,
+  has_transport_fee: r.has_transport_fee ?? false,
+  transport_gross_fee: r.transport_gross_fee || 0,
+  transport_concession: r.transport_concession || 0,
+  paid_transport_fee: r.paid_transport_fee || 0,
+  has_application_fee: r.has_application_fee ?? false,
+  application_gross_fee: r.application_gross_fee || 0,
+  application_concession: r.application_concession || 0,
+  paid_application_fee: r.paid_application_fee || 0,
+  has_registration_fee: r.has_registration_fee ?? false,
+  registration_gross_fee: r.registration_gross_fee || 0,
+  registration_concession: r.registration_concession || 0,
+  paid_registration_fee: r.paid_registration_fee || 0,
   remarks: r.remarks || "",
   status: r.status || "Active",
 });
@@ -161,6 +236,20 @@ export default function StudentFeeReportForm({ record, onClose, onSaved }) {
 
   const setField = (k, v) => setFields((f) => ({ ...f, [k]: v }));
 
+  // Zero out a bucket's numbers whenever its checkbox is off - defense in
+  // depth alongside the same sanitization feeController.js does server-side.
+  const sanitizedFields = () => {
+    const out = { ...fields };
+    for (const bucket of FEE_BUCKETS) {
+      if (!out[bucket.flag]) {
+        out[bucket.gross] = 0;
+        out[bucket.concession] = 0;
+        out[bucket.paid] = 0;
+      }
+    }
+    return out;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!studentLocked) {
@@ -169,8 +258,9 @@ export default function StudentFeeReportForm({ record, onClose, onSaved }) {
     }
     setSaving(true);
     try {
+      const payload = sanitizedFields();
       if (reportId) {
-        await feeApi.updateReport(reportId, fields);
+        await feeApi.updateReport(reportId, payload);
         toast.success("Fee record updated.");
       } else {
         await feeApi.createReport({
@@ -179,7 +269,7 @@ export default function StudentFeeReportForm({ record, onClose, onSaved }) {
           father_name: selectedStudent.father_name,
           mob_number: selectedStudent.mobile,
           class: selectedClass,
-          ...fields,
+          ...payload,
         });
         toast.success("Fee record created.");
       }
@@ -340,73 +430,57 @@ export default function StudentFeeReportForm({ record, onClose, onSaved }) {
               />
             </div>
 
-            <div>
-              <label className="text-xs font-medium text-slate-500">
-                Admission Gross Fee
-              </label>
-              <NumberInput
-                className="h-9 mt-1"
-                disabled={feeFieldsDisabled}
-                value={fields.adm_gross_fee}
-                onChange={(n) => setField("adm_gross_fee", n)}
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-500">
-                Admission Concession
-              </label>
-              <NumberInput
-                className="h-9 mt-1"
-                disabled={feeFieldsDisabled}
-                value={fields.adm_concession}
-                onChange={(n) => setField("adm_concession", n)}
-              />
-            </div>
-            <div className="col-span-2">
-              <label className="text-xs font-medium text-slate-500">
-                Paid Admission Fee
-              </label>
-              <NumberInput
-                className="h-9 mt-1"
-                disabled={feeFieldsDisabled}
-                value={fields.paid_adm_fee}
-                onChange={(n) => setField("paid_adm_fee", n)}
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-medium text-slate-500">
-                Gross Term Fee
-              </label>
-              <NumberInput
-                className="h-9 mt-1"
-                disabled={feeFieldsDisabled}
-                value={fields.gross_term_fee}
-                onChange={(n) => setField("gross_term_fee", n)}
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-500">
-                Term Concession
-              </label>
-              <NumberInput
-                className="h-9 mt-1"
-                disabled={feeFieldsDisabled}
-                value={fields.term_concession}
-                onChange={(n) => setField("term_concession", n)}
-              />
-            </div>
-            <div className="col-span-2">
-              <label className="text-xs font-medium text-slate-500">
-                Paid Term Fee
-              </label>
-              <NumberInput
-                className="h-9 mt-1"
-                disabled={feeFieldsDisabled}
-                value={fields.paid_term_fee}
-                onChange={(n) => setField("paid_term_fee", n)}
-              />
-            </div>
+            {FEE_BUCKETS.map((bucket) => (
+              <div key={bucket.key} className="col-span-2 space-y-2">
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                  <Checkbox
+                    checked={fields[bucket.flag]}
+                    disabled={feeFieldsDisabled}
+                    onCheckedChange={(checked) =>
+                      setField(bucket.flag, !!checked)
+                    }
+                  />
+                  {bucket.label}
+                </label>
+                {fields[bucket.flag] && (
+                  <div className="grid grid-cols-2 gap-3 pl-6">
+                    <div>
+                      <label className="text-xs font-medium text-slate-500">
+                        Gross Fee
+                      </label>
+                      <NumberInput
+                        className="h-9 mt-1"
+                        disabled={feeFieldsDisabled}
+                        value={fields[bucket.gross]}
+                        onChange={(n) => setField(bucket.gross, n)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-500">
+                        Concession
+                      </label>
+                      <NumberInput
+                        className="h-9 mt-1"
+                        disabled={feeFieldsDisabled}
+                        value={fields[bucket.concession]}
+                        onChange={(n) => setField(bucket.concession, n)}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-xs font-medium text-slate-500">
+                        Paid
+                      </label>
+                      <NumberInput
+                        className="h-9 mt-1"
+                        disabled={feeFieldsDisabled}
+                        value={fields[bucket.paid]}
+                        onChange={(n) => setField(bucket.paid, n)}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
 
             <div className="col-span-2">
               <label className="text-xs font-medium text-slate-500">
