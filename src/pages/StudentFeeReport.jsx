@@ -21,9 +21,77 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import StudentFeeReportForm from "@/components/fees/StudentFeeReportForm";
+import StatusBadge from "@/components/bp/StatusBadge";
 
 const fmt = (n) => `₹${(n || 0).toLocaleString("en-IN")}`;
 const fmtNum = (n) => (n || 0).toLocaleString("en-IN");
+
+// One entry per fee bucket - drives the column groups, per-row cells, and
+// totals row below so all five buckets render identically. Mirrors
+// FEE_BUCKETS in feeController.js/StudentFeeReportForm.jsx (field names must
+// match the StudentFeeReport schema exactly).
+const FEE_BUCKETS = [
+  {
+    key: "adm",
+    flag: "has_admission_fee",
+    label: "Admission Fee",
+    headerBg: "bg-green-700",
+    headerBorder: "border-green-600",
+    gross: "adm_gross_fee",
+    concession: "adm_concession",
+    net: "net_adm_fee",
+    paid: "paid_adm_fee",
+    balance: "balance_adm_fee",
+  },
+  {
+    key: "term",
+    flag: "has_term_fee",
+    label: "Term Fee",
+    headerBg: "bg-amber-700",
+    headerBorder: "border-amber-600",
+    gross: "gross_term_fee",
+    concession: "term_concession",
+    net: "net_term_fee",
+    paid: "paid_term_fee",
+    balance: "balance_term_fee",
+  },
+  {
+    key: "transport",
+    flag: "has_transport_fee",
+    label: "Transport Fee",
+    headerBg: "bg-sky-700",
+    headerBorder: "border-sky-600",
+    gross: "transport_gross_fee",
+    concession: "transport_concession",
+    net: "net_transport_fee",
+    paid: "paid_transport_fee",
+    balance: "balance_transport_fee",
+  },
+  {
+    key: "application",
+    flag: "has_application_fee",
+    label: "Application Fee",
+    headerBg: "bg-purple-700",
+    headerBorder: "border-purple-600",
+    gross: "application_gross_fee",
+    concession: "application_concession",
+    net: "net_application_fee",
+    paid: "paid_application_fee",
+    balance: "balance_application_fee",
+  },
+  {
+    key: "registration",
+    flag: "has_registration_fee",
+    label: "Registration Fee",
+    headerBg: "bg-rose-700",
+    headerBorder: "border-rose-600",
+    gross: "registration_gross_fee",
+    concession: "registration_concession",
+    net: "net_registration_fee",
+    paid: "paid_registration_fee",
+    balance: "balance_registration_fee",
+  },
+];
 
 // StudentFeeReport.class is a real Class reference now (ObjectId), not a
 // plain string - see models/StudentFeeReport.js. This resolves either a
@@ -66,6 +134,7 @@ export default function StudentFeeReportPage() {
   const [filterClass, setFilterClass] = useState("all");
   const [filterType, setFilterType] = useState("all");
   const [filterBalance, setFilterBalance] = useState("all");
+  const [filterOldFee, setFilterOldFee] = useState("all");
   const [sortBy, setSortBy] = useState("sno");
   const [sortDir, setSortDir] = useState("asc");
   const [showForm, setShowForm] = useState(false);
@@ -131,7 +200,14 @@ export default function StudentFeeReportPage() {
           filterBalance === "all" ||
           (filterBalance === "pending" && bal > 0) ||
           (filterBalance === "cleared" && bal <= 0);
-        return matchSearch && matchClass && matchType && matchBalance;
+        const oldFee = r.old_fee || 0;
+        const matchOldFee =
+          filterOldFee === "all" ||
+          (filterOldFee === "has" && oldFee > 0) ||
+          (filterOldFee === "none" && oldFee <= 0);
+        return (
+          matchSearch && matchClass && matchType && matchBalance && matchOldFee
+        );
       })
       .sort((a, b) => {
         let aVal, bVal;
@@ -166,6 +242,7 @@ export default function StudentFeeReportPage() {
     filterClass,
     filterType,
     filterBalance,
+    filterOldFee,
     sortBy,
     sortDir,
     classesById,
@@ -174,32 +251,28 @@ export default function StudentFeeReportPage() {
   const totals = useMemo(
     () =>
       filtered.reduce(
-        (acc, r) => ({
-          old_fee: acc.old_fee + (r.old_fee || 0),
-          adm_gross_fee: acc.adm_gross_fee + (r.adm_gross_fee || 0),
-          adm_concession: acc.adm_concession + (r.adm_concession || 0),
-          net_adm_fee: acc.net_adm_fee + (r.net_adm_fee || 0),
-          paid_adm_fee: acc.paid_adm_fee + (r.paid_adm_fee || 0),
-          balance_adm_fee: acc.balance_adm_fee + (r.balance_adm_fee || 0),
-          gross_term_fee: acc.gross_term_fee + (r.gross_term_fee || 0),
-          term_concession: acc.term_concession + (r.term_concession || 0),
-          net_term_fee: acc.net_term_fee + (r.net_term_fee || 0),
-          paid_term_fee: acc.paid_term_fee + (r.paid_term_fee || 0),
-          balance_term_fee: acc.balance_term_fee + (r.balance_term_fee || 0),
-        }),
-        {
-          old_fee: 0,
-          adm_gross_fee: 0,
-          adm_concession: 0,
-          net_adm_fee: 0,
-          paid_adm_fee: 0,
-          balance_adm_fee: 0,
-          gross_term_fee: 0,
-          term_concession: 0,
-          net_term_fee: 0,
-          paid_term_fee: 0,
-          balance_term_fee: 0,
+        (acc, r) => {
+          acc.old_fee += r.old_fee || 0;
+          for (const b of FEE_BUCKETS) {
+            acc[b.gross] += r[b.gross] || 0;
+            acc[b.concession] += r[b.concession] || 0;
+            acc[b.net] += r[b.net] || 0;
+            acc[b.paid] += r[b.paid] || 0;
+            acc[b.balance] += r[b.balance] || 0;
+          }
+          return acc;
         },
+        FEE_BUCKETS.reduce(
+          (acc, b) => ({
+            ...acc,
+            [b.gross]: 0,
+            [b.concession]: 0,
+            [b.net]: 0,
+            [b.paid]: 0,
+            [b.balance]: 0,
+          }),
+          { old_fee: 0 },
+        ),
       ),
     [filtered],
   );
@@ -254,6 +327,21 @@ export default function StudentFeeReportPage() {
       "Net Term Fee",
       "Paid Term Fee",
       "Balance Fee",
+      "Transport Gross Fee",
+      "Transport Concession",
+      "Net Transport Fee",
+      "Paid Transport Fee",
+      "Balance Transport Fee",
+      "Application Gross Fee",
+      "Application Concession",
+      "Net Application Fee",
+      "Paid Application Fee",
+      "Balance Application Fee",
+      "Registration Gross Fee",
+      "Registration Concession",
+      "Net Registration Fee",
+      "Paid Registration Fee",
+      "Balance Registration Fee",
       "Remarks",
       "Status",
     ];
@@ -276,14 +364,26 @@ export default function StudentFeeReportPage() {
       r.net_term_fee || 0,
       r.paid_term_fee || 0,
       r.balance_term_fee || 0,
+      r.transport_gross_fee || 0,
+      r.transport_concession || 0,
+      r.net_transport_fee || 0,
+      r.paid_transport_fee || 0,
+      r.balance_transport_fee || 0,
+      r.application_gross_fee || 0,
+      r.application_concession || 0,
+      r.net_application_fee || 0,
+      r.paid_application_fee || 0,
+      r.balance_application_fee || 0,
+      r.registration_gross_fee || 0,
+      r.registration_concession || 0,
+      r.net_registration_fee || 0,
+      r.paid_registration_fee || 0,
+      r.balance_registration_fee || 0,
       r.remarks || "",
       r.status || "Active",
     ]);
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    ws["!cols"] = [
-      6, 12, 22, 20, 14, 10, 10, 14, 14, 14, 14, 16, 10, 16, 14, 14, 14, 14, 20,
-      10,
-    ].map((w) => ({ wch: w }));
+    ws["!cols"] = headers.map(() => ({ wch: 14 }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Fee Report");
     XLSX.writeFile(wb, "student-fee-report.xlsx");
@@ -398,6 +498,16 @@ export default function StudentFeeReportPage() {
             <SelectItem value="cleared">Fully Cleared</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={filterOldFee} onValueChange={setFilterOldFee}>
+          <SelectTrigger className="w-40 h-9">
+            <SelectValue placeholder="Old Fee" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All (Old Fee)</SelectItem>
+            <SelectItem value="has">Has Old Fee</SelectItem>
+            <SelectItem value="none">No Old Fee</SelectItem>
+          </SelectContent>
+        </Select>
         <Select value={sortBy} onValueChange={setSortBy}>
           <SelectTrigger className="w-36 h-9">
             <SelectValue placeholder="Sort By" />
@@ -431,18 +541,18 @@ export default function StudentFeeReportPage() {
                 >
                   Student Information
                 </th>
-                <th
-                  colSpan={5}
-                  className="bg-green-700 text-white text-center py-2 px-3 font-semibold text-xs uppercase tracking-wide border-r border-green-600"
-                >
-                  Admission Fee Details
+                <th className="bg-slate-500 text-white text-center py-2 px-3 font-semibold text-xs uppercase tracking-wide border-r border-slate-400">
+                  Previous Due
                 </th>
-                <th
-                  colSpan={6}
-                  className="bg-amber-700 text-white text-center py-2 px-3 font-semibold text-xs uppercase tracking-wide border-r border-amber-600"
-                >
-                  Term Fee
-                </th>
+                {FEE_BUCKETS.map((b) => (
+                  <th
+                    key={b.key}
+                    colSpan={6}
+                    className={`${b.headerBg} text-white text-center py-2 px-3 font-semibold text-xs uppercase tracking-wide border-r ${b.headerBorder}`}
+                  >
+                    {b.label} Details
+                  </th>
+                ))}
                 <th className="bg-slate-600 text-white text-center py-2 px-3 font-semibold text-xs uppercase tracking-wide border-r border-slate-500">
                   Remarks
                 </th>
@@ -470,34 +580,22 @@ export default function StudentFeeReportPage() {
                     {h}
                   </th>
                 ))}
-                {[
-                  "Adm Gross Fee",
-                  "Concession",
-                  "Net Adm Fee",
-                  "Paid Adm Fee",
-                  "Balance Adm Fee",
-                ].map((h) => (
-                  <th
-                    key={h}
-                    className="text-right px-3 py-2 font-semibold text-slate-600 whitespace-nowrap border-r border-slate-200"
-                  >
-                    {h}
-                  </th>
-                ))}
-                {[
-                  "Old Fee",
-                  "Gross Term Fee",
-                  "Concession",
-                  "Net Term Fee",
-                  "Paid Term Fee",
-                  "Balance Fee",
-                ].map((h) => (
-                  <th
-                    key={h}
-                    className="text-right px-3 py-2 font-semibold text-slate-600 whitespace-nowrap border-r border-slate-200"
-                  >
-                    {h}
-                  </th>
+                <th className="text-right px-3 py-2 font-semibold text-slate-600 whitespace-nowrap border-r border-slate-200">
+                  Old Fee
+                </th>
+                {FEE_BUCKETS.map((b) => (
+                  <React.Fragment key={b.key}>
+                    {["Gross", "Concession", "Net", "Paid", "Balance", "Status"].map(
+                      (h) => (
+                        <th
+                          key={`${b.key}-${h}`}
+                          className="text-right px-3 py-2 font-semibold text-slate-600 whitespace-nowrap border-r border-slate-200"
+                        >
+                          {h}
+                        </th>
+                      ),
+                    )}
+                  </React.Fragment>
                 ))}
                 <th className="text-left px-3 py-2 font-semibold text-slate-600 border-r border-slate-200">
                   Remarks
@@ -513,20 +611,18 @@ export default function StudentFeeReportPage() {
             <tbody className="divide-y divide-slate-100">
               {loading && records.length === 0 ? (
                 <tr>
-                  <td colSpan={21} className="text-center py-10 text-slate-400">
+                  <td colSpan={41} className="text-center py-10 text-slate-400">
                     Loading...
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={21} className="text-center py-10 text-slate-400">
+                  <td colSpan={41} className="text-center py-10 text-slate-400">
                     No records found
                   </td>
                 </tr>
               ) : (
                 filtered.map((r, i) => {
-                  const admBal = r.balance_adm_fee || 0;
-                  const termBal = r.balance_term_fee || 0;
                   return (
                     <tr key={r._id} className="hover:bg-slate-50">
                       <td className="px-3 py-2 text-slate-500 border-r border-slate-100">
@@ -556,45 +652,47 @@ export default function StudentFeeReportPage() {
                           {r.student_type || "—"}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-right text-slate-700 border-r border-slate-100">
-                        {fmtNum(r.adm_gross_fee)}
-                      </td>
-                      <td className="px-3 py-2 text-right text-slate-600 border-r border-slate-100">
-                        {fmtNum(r.adm_concession)}
-                      </td>
-                      <td className="px-3 py-2 text-right font-medium text-slate-800 border-r border-slate-100">
-                        {fmtNum(r.net_adm_fee)}
-                      </td>
-                      <td className="px-3 py-2 text-right text-slate-700 border-r border-slate-100">
-                        {fmtNum(r.paid_adm_fee)}
-                      </td>
-                      <td
-                        className={`px-3 py-2 text-right font-semibold border-r border-slate-100 ${admBal > 0 ? "text-red-600" : "text-green-600"}`}
-                      >
-                        {admBal > 0 ? fmtNum(admBal) : "₹0"}
-                      </td>
                       <td className="px-3 py-2 text-right text-slate-600 border-r border-slate-100">
                         {r.student_type === "New" ? "—" : fmtNum(r.old_fee)}
                       </td>
-                      <td className="px-3 py-2 text-right text-slate-700 border-r border-slate-100">
-                        {fmtNum(r.gross_term_fee)}
-                      </td>
-                      <td className="px-3 py-2 text-right text-slate-600 border-r border-slate-100">
-                        {fmtNum(r.term_concession)}
-                      </td>
-                      <td className="px-3 py-2 text-right font-medium text-slate-800 border-r border-slate-100">
-                        {fmtNum(r.net_term_fee)}
-                      </td>
-                      <td
-                        className={`px-3 py-2 text-right font-medium border-r border-slate-100 ${(r.paid_term_fee || 0) >= (r.net_term_fee || 0) && (r.net_term_fee || 0) > 0 ? "text-green-600" : "text-amber-600"}`}
-                      >
-                        {fmtNum(r.paid_term_fee)}
-                      </td>
-                      <td
-                        className={`px-3 py-2 text-right font-semibold border-r border-slate-100 ${termBal > 0 ? "text-red-600" : "text-green-600"}`}
-                      >
-                        {termBal > 0 ? fmtNum(termBal) : "₹0"}
-                      </td>
+                      {FEE_BUCKETS.map((b) => {
+                        const has = r[b.flag];
+                        const balance = r[b.balance] || 0;
+                        return (
+                          <React.Fragment key={b.key}>
+                            <td className="px-3 py-2 text-right text-slate-700 border-r border-slate-100">
+                              {has ? fmtNum(r[b.gross]) : "—"}
+                            </td>
+                            <td className="px-3 py-2 text-right text-slate-600 border-r border-slate-100">
+                              {has ? fmtNum(r[b.concession]) : "—"}
+                            </td>
+                            <td className="px-3 py-2 text-right font-medium text-slate-800 border-r border-slate-100">
+                              {has ? fmtNum(r[b.net]) : "—"}
+                            </td>
+                            <td className="px-3 py-2 text-right text-slate-700 border-r border-slate-100">
+                              {has ? fmtNum(r[b.paid]) : "—"}
+                            </td>
+                            <td
+                              className={`px-3 py-2 text-right font-semibold border-r border-slate-100 ${
+                                !has
+                                  ? ""
+                                  : balance > 0
+                                    ? "text-red-600"
+                                    : "text-green-600"
+                              }`}
+                            >
+                              {has ? fmtNum(balance) : "—"}
+                            </td>
+                            <td className="px-3 py-2 text-center border-r border-slate-100">
+                              {has ? (
+                                <StatusBadge value={balance > 0 ? "Pending" : "Paid"} />
+                              ) : (
+                                <span className="text-slate-300">—</span>
+                              )}
+                            </td>
+                          </React.Fragment>
+                        );
+                      })}
                       <td className="px-3 py-2 text-slate-500 border-r border-slate-100 max-w-[100px]">
                         <span title={r.remarks}>
                           {r.remarks && r.remarks.length > 15
@@ -644,42 +742,30 @@ export default function StudentFeeReportPage() {
                     TOTALS ({filtered.length} students)
                   </td>
                   <td className="px-3 py-2.5 text-right border-r border-slate-600">
-                    {fmtNum(totals.adm_gross_fee)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right border-r border-slate-600">
-                    {fmtNum(totals.adm_concession)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right border-r border-slate-600">
-                    {fmtNum(totals.net_adm_fee)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right border-r border-slate-600">
-                    {fmtNum(totals.paid_adm_fee)}
-                  </td>
-                  <td
-                    className={`px-3 py-2.5 text-right border-r border-slate-600 ${totals.balance_adm_fee > 0 ? "text-red-300" : "text-green-300"}`}
-                  >
-                    {fmtNum(totals.balance_adm_fee)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right border-r border-slate-600">
                     {fmtNum(totals.old_fee)}
                   </td>
-                  <td className="px-3 py-2.5 text-right border-r border-slate-600">
-                    {fmtNum(totals.gross_term_fee)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right border-r border-slate-600">
-                    {fmtNum(totals.term_concession)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right border-r border-slate-600">
-                    {fmtNum(totals.net_term_fee)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right text-green-300 border-r border-slate-600">
-                    {fmtNum(totals.paid_term_fee)}
-                  </td>
-                  <td
-                    className={`px-3 py-2.5 text-right border-r border-slate-600 ${totals.balance_term_fee > 0 ? "text-red-300" : "text-green-300"}`}
-                  >
-                    {fmtNum(totals.balance_term_fee)}
-                  </td>
+                  {FEE_BUCKETS.map((b) => (
+                    <React.Fragment key={b.key}>
+                      <td className="px-3 py-2.5 text-right border-r border-slate-600">
+                        {fmtNum(totals[b.gross])}
+                      </td>
+                      <td className="px-3 py-2.5 text-right border-r border-slate-600">
+                        {fmtNum(totals[b.concession])}
+                      </td>
+                      <td className="px-3 py-2.5 text-right border-r border-slate-600">
+                        {fmtNum(totals[b.net])}
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-green-300 border-r border-slate-600">
+                        {fmtNum(totals[b.paid])}
+                      </td>
+                      <td
+                        className={`px-3 py-2.5 text-right border-r border-slate-600 ${totals[b.balance] > 0 ? "text-red-300" : "text-green-300"}`}
+                      >
+                        {fmtNum(totals[b.balance])}
+                      </td>
+                      <td className="px-3 py-2.5 border-r border-slate-600"></td>
+                    </React.Fragment>
+                  ))}
                   <td colSpan={3} className="px-3 py-2.5"></td>
                 </tr>
               </tfoot>

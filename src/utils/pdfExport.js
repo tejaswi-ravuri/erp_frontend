@@ -71,18 +71,35 @@ function row(doc, label, value, y, shade = false) {
 }
 
 // ── FEE RECEIPT ──────────────────────────────────────────────────────────
-export function printFeeReceipt(fee) {
+// `feeOrFees` is either a single FeePayment-like object (original,
+// unchanged behavior - one receipt, one fee type) or an array of them for
+// a combined multi-payment receipt. `oldFeePayments` is an optional second
+// array - payments from a prior academic year, rendered in their own
+// "Old Fee / Previous Year" section instead of being mixed in with the
+// current year's line items. The caller (BPFees.jsx) decides what counts
+// as "old" (it already knows the current academic year); this function
+// just renders whatever two groups it's given.
+export function printFeeReceipt(feeOrFees, oldFeePayments = []) {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   header(doc, "FEE RECEIPT");
 
   let y = 36;
+  const isMultiple = Array.isArray(feeOrFees);
+  const currentYearPayments = isMultiple ? feeOrFees : [feeOrFees];
+  const first = currentYearPayments[0] || oldFeePayments[0] || {};
 
   // Receipt meta
   doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(100);
-  doc.text(`Receipt No: ${fee.receipt_no || "N/A"}`, 14, y);
-  doc.text(`Date: ${fee.payment_date || today()}`, 196, y, { align: "right" });
+  doc.text(
+    `Receipt No: ${isMultiple ? `${currentYearPayments.length + oldFeePayments.length} payments` : first.receipt_no || "N/A"}`,
+    14,
+    y,
+  );
+  doc.text(`Date: ${first.payment_date || today()}`, 196, y, {
+    align: "right",
+  });
   doc.setTextColor(30, 30, 30);
   y += 8;
 
@@ -92,30 +109,80 @@ export function printFeeReceipt(fee) {
   y += 8;
 
   y = sectionTitle(doc, "Student Details", y, [16, 185, 129]);
-  y = row(doc, "Student Name", fee.student_name || "—", y, false);
-  y = row(doc, "Student ID", fee.student_id || "—", y, true);
-  y = row(doc, "Academic Year", fee.academic_year || "—", y, false);
+  y = row(doc, "Student Name", first.student_name || "—", y, false);
+  y = row(doc, "Student ID", first.student_id || "—", y, true);
+  y = row(doc, "Academic Year", first.academic_year || "—", y, false);
   y += 4;
 
-  y = sectionTitle(doc, "Payment Details", y, [79, 70, 229]);
-  y = row(doc, "Fee Type", fee.fee_type || "—", y, false);
-  y = row(doc, "Amount Paid", fmtINR(fee.amount), y, true);
-  y = row(doc, "Payment Mode", fee.payment_mode || "—", y, false);
-  y = row(doc, "Payment Date", fee.payment_date || "—", y, true);
-  y = row(doc, "Status", fee.status || "—", y, false);
-  y += 6;
+  if (!isMultiple) {
+    // Original single-payment layout, unchanged.
+    y = sectionTitle(doc, "Payment Details", y, [79, 70, 229]);
+    y = row(doc, "Fee Type", first.fee_type || "—", y, false);
+    y = row(doc, "Amount Paid", fmtINR(first.amount), y, true);
+    y = row(doc, "Payment Mode", first.payment_mode || "—", y, false);
+    y = row(doc, "Payment Date", first.payment_date || "—", y, true);
+    y = row(doc, "Status", first.status || "—", y, false);
+    y += 6;
 
-  // Amount box
-  doc.setFillColor(16, 185, 129);
-  doc.roundedRect(14, y, 182, 16, 3, 3, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(13);
-  doc.setFont("helvetica", "bold");
-  doc.text(`Amount Received: ${fmtINR(fee.amount)}`, 105, y + 10, {
-    align: "center",
-  });
-  doc.setTextColor(30, 30, 30);
-  y += 24;
+    doc.setFillColor(16, 185, 129);
+    doc.roundedRect(14, y, 182, 16, 3, 3, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(13);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Amount Received: ${fmtINR(first.amount)}`, 105, y + 10, {
+      align: "center",
+    });
+    doc.setTextColor(30, 30, 30);
+    y += 24;
+  } else {
+    let currentTotal = 0;
+    if (currentYearPayments.length > 0) {
+      y = sectionTitle(doc, "This Academic Year", y, [79, 70, 229]);
+      currentYearPayments.forEach((p, i) => {
+        y = row(
+          doc,
+          `${p.fee_type || "Fee"} (${p.payment_mode || "—"})`,
+          fmtINR(p.amount),
+          y,
+          i % 2 === 0,
+        );
+        currentTotal += Number(p.amount) || 0;
+      });
+      y = row(doc, "Subtotal", fmtINR(currentTotal), y, false);
+      y += 4;
+    }
+
+    let oldTotal = 0;
+    if (oldFeePayments.length > 0) {
+      y = sectionTitle(doc, "Old Fee / Previous Year", y, [217, 119, 6]);
+      oldFeePayments.forEach((p, i) => {
+        y = row(
+          doc,
+          `${p.fee_type || "Fee"} · ${p.academic_year || "—"}`,
+          fmtINR(p.amount),
+          y,
+          i % 2 === 0,
+        );
+        oldTotal += Number(p.amount) || 0;
+      });
+      y = row(doc, "Subtotal", fmtINR(oldTotal), y, false);
+      y += 4;
+    }
+
+    doc.setFillColor(16, 185, 129);
+    doc.roundedRect(14, y, 182, 16, 3, 3, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(13);
+    doc.setFont("helvetica", "bold");
+    doc.text(
+      `Total Amount Received: ${fmtINR(currentTotal + oldTotal)}`,
+      105,
+      y + 10,
+      { align: "center" },
+    );
+    doc.setTextColor(30, 30, 30);
+    y += 24;
+  }
 
   // Signature line
   doc.setFontSize(8);
@@ -125,7 +192,10 @@ export function printFeeReceipt(fee) {
   doc.line(140, y + 11, 196, y + 11);
 
   footer(doc);
-  doc.save(`Receipt_${fee.receipt_no || fee.student_name || "Fee"}.pdf`);
+  const filenameBase = isMultiple
+    ? first.student_name || "Fee"
+    : first.receipt_no || first.student_name || "Fee";
+  doc.save(`Receipt_${filenameBase}.pdf`);
 }
 
 // ── TRACKING EXPENSES EXPORT ─────────────────────────────────────────────

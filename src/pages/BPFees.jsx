@@ -6,12 +6,14 @@ import {
   AlertCircle,
   CheckCircle,
   Printer,
+  Receipt,
   Bell,
   BellRing,
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -64,13 +66,19 @@ const EMPTY_FORM = {
   student_id: "",
   student_name: "",
   academic_year: getCurrentAcademicYear(),
-  // Three itemized rows, matching collectPayment()'s
-  // rows: [{key: "school_fee"|"admission_fee"|"previous_due", amount}]
-  // contract - these map 1:1 to StudentFeeReport's paid_term_fee /
-  // paid_adm_fee / old_fee. Left blank = that row is skipped entirely.
+  // Itemized rows, matching collectPayment()'s rows: [{key, amount}]
+  // contract - each maps 1:1 to a StudentFeeReport bucket (paid_term_fee /
+  // paid_adm_fee / old_fee / paid_transport_fee / paid_application_fee /
+  // paid_registration_fee). "School Fee" is the only input for the Term
+  // Fee bucket - a separate "Term Fee" input used to exist here but paid
+  // into the exact same balance, so it was folded into this one. Left
+  // blank = that row is skipped entirely.
   schoolFeeAmount: "",
   admissionFeeAmount: "",
   previousDueAmount: "",
+  applicationFeeAmount: "",
+  transportFeeAmount: "",
+  registrationFeeAmount: "",
   payment_date: new Date().toISOString().split("T")[0],
   payment_mode: "Cash",
   voucher_type: "MvNo",
@@ -100,6 +108,7 @@ export default function BPFees() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [remindedIds, setRemindedIds] = useState(new Set());
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
   // `background: true` is used by the 10s poll below - it refreshes
   // `fees` in place without touching `loading`, so a silent sync never
@@ -168,7 +177,10 @@ export default function BPFees() {
   const totalRowsAmount =
     (Number(form.schoolFeeAmount) || 0) +
     (Number(form.admissionFeeAmount) || 0) +
-    (Number(form.previousDueAmount) || 0);
+    (Number(form.previousDueAmount) || 0) +
+    (Number(form.applicationFeeAmount) || 0) +
+    (Number(form.transportFeeAmount) || 0) +
+    (Number(form.registrationFeeAmount) || 0);
 
   // collectPayment() requires an existing StudentFeeReport id, so unlike
   // an earlier draft of this page, this is a hard block, not just a
@@ -196,6 +208,21 @@ export default function BPFees() {
         rows.push({
           key: "previous_due",
           amount: Number(form.previousDueAmount),
+        });
+      if (Number(form.applicationFeeAmount) > 0)
+        rows.push({
+          key: "application_fee",
+          amount: Number(form.applicationFeeAmount),
+        });
+      if (Number(form.transportFeeAmount) > 0)
+        rows.push({
+          key: "transport_fee",
+          amount: Number(form.transportFeeAmount),
+        });
+      if (Number(form.registrationFeeAmount) > 0)
+        rows.push({
+          key: "registration_fee",
+          amount: Number(form.registrationFeeAmount),
         });
 
       const payload = {
@@ -249,6 +276,51 @@ export default function BPFees() {
     const ms = statusFilter === "All" || f.status === statusFilter;
     return my && ms;
   });
+
+  // Splits a set of payments into "this academic year" vs everything else,
+  // so a printed receipt can call out older dues as "Old Fee" - see
+  // printFeeReceipt in pdfExport.js, which renders whatever two groups
+  // it's given without knowing anything about academic years itself.
+  const splitByCurrentYear = (payments) => ({
+    current: payments.filter((p) => p.academic_year === currentYear),
+    old: payments.filter((p) => p.academic_year !== currentYear),
+  });
+
+  const toggleSelected = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) =>
+      filtered.length > 0 && prev.size === filtered.length
+        ? new Set()
+        : new Set(filtered.map((f) => f._id)),
+    );
+  };
+
+  const printSelected = () => {
+    const selected = filtered.filter((f) => selectedIds.has(f._id));
+    if (selected.length === 0) return;
+    const { current, old } = splitByCurrentYear(selected);
+    printFeeReceipt(current, old);
+    setSelectedIds(new Set());
+  };
+
+  // One-click "this student's full receipt" - every payment they've made
+  // this academic year, with anything from an older year broken out into
+  // its own "Old Fee" section on the same PDF.
+  const printStudentReceipt = (fee) => {
+    const studentPayments = fees.filter(
+      (f) => f.student_id === fee.student_id && f.status !== "Cancelled",
+    );
+    const { current, old } = splitByCurrentYear(studentPayments);
+    printFeeReceipt(current, old);
+  };
 
   const sendReminder = (fee, bulk = false) => {
     setRemindedIds((prev) => new Set([...prev, fee._id]));
@@ -376,6 +448,16 @@ export default function BPFees() {
             <SelectItem value="Cancelled">Cancelled</SelectItem>
           </SelectContent>
         </Select>
+        {selectedIds.size > 0 && (
+          <Button
+            size="sm"
+            onClick={printSelected}
+            className="gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white"
+          >
+            <Printer className="w-3.5 h-3.5" /> Print Selected (
+            {selectedIds.size})
+          </Button>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -383,6 +465,14 @@ export default function BPFees() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
+                <th className="px-4 py-3 text-left">
+                  <Checkbox
+                    checked={
+                      filtered.length > 0 && selectedIds.size === filtered.length
+                    }
+                    onCheckedChange={toggleSelectAll}
+                  />
+                </th>
                 {[
                   "Receipt No",
                   "Student",
@@ -407,7 +497,7 @@ export default function BPFees() {
               {loading && fees.length === 0 && (
                 <tr>
                   <td
-                    colSpan={9}
+                    colSpan={10}
                     className="px-4 py-8 text-center text-slate-400"
                   >
                     Loading...
@@ -420,6 +510,12 @@ export default function BPFees() {
                     key={f._id}
                     className={`hover:bg-red-50 transition-colors ${f.status === "Pending" ? "bg-red-50 border-l-4 border-l-red-400" : ""}`}
                   >
+                    <td className="px-4 py-3">
+                      <Checkbox
+                        checked={selectedIds.has(f._id)}
+                        onCheckedChange={() => toggleSelected(f._id)}
+                      />
+                    </td>
                     <td className="px-4 py-3 font-mono text-xs text-slate-500">
                       {f.receipt_no || "—"}
                     </td>
@@ -465,13 +561,20 @@ export default function BPFees() {
                       >
                         <Printer className="w-4 h-4" />
                       </button>
+                      <button
+                        onClick={() => printStudentReceipt(f)}
+                        title="Print full receipt for this student (this academic year, old fee separated)"
+                        className="text-teal-500 hover:text-teal-700 transition-colors p-1 rounded hover:bg-teal-50"
+                      >
+                        <Receipt className="w-4 h-4" />
+                      </button>
                     </td>
                   </tr>
                 ))}
               {!loading && filtered.length === 0 && (
                 <tr>
                   <td
-                    colSpan={9}
+                    colSpan={10}
                     className="px-4 py-8 text-center text-slate-400"
                   >
                     No records found.
@@ -626,6 +729,72 @@ export default function BPFees() {
                         value={form.previousDueAmount}
                         onChange={(e) =>
                           setField("previousDueAmount", e.target.value)
+                        }
+                        className="text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-xs font-medium text-slate-600 mb-1 block">
+                        Application Fee
+                      </label>
+                      {feeReport.has_application_fee && (
+                        <p className="text-[11px] text-slate-400 mb-1">
+                          Balance ₹
+                          {(
+                            feeReport.balance_application_fee || 0
+                          ).toLocaleString("en-IN")}
+                        </p>
+                      )}
+                      <Input
+                        type="number"
+                        value={form.applicationFeeAmount}
+                        onChange={(e) =>
+                          setField("applicationFeeAmount", e.target.value)
+                        }
+                        className="text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600 mb-1 block">
+                        Transport Fee
+                      </label>
+                      {feeReport.has_transport_fee && (
+                        <p className="text-[11px] text-slate-400 mb-1">
+                          Balance ₹
+                          {(
+                            feeReport.balance_transport_fee || 0
+                          ).toLocaleString("en-IN")}
+                        </p>
+                      )}
+                      <Input
+                        type="number"
+                        value={form.transportFeeAmount}
+                        onChange={(e) =>
+                          setField("transportFeeAmount", e.target.value)
+                        }
+                        className="text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600 mb-1 block">
+                        Registration Fee
+                      </label>
+                      {feeReport.has_registration_fee && (
+                        <p className="text-[11px] text-slate-400 mb-1">
+                          Balance ₹
+                          {(
+                            feeReport.balance_registration_fee || 0
+                          ).toLocaleString("en-IN")}
+                        </p>
+                      )}
+                      <Input
+                        type="number"
+                        value={form.registrationFeeAmount}
+                        onChange={(e) =>
+                          setField("registrationFeeAmount", e.target.value)
                         }
                         className="text-sm"
                       />

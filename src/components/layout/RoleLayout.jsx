@@ -97,24 +97,24 @@ const SUB_NAV_BY_ROLE = {
       path: "/admissions/admission-form",
       parentNav: "Admissions",
     },
-    {
-      label: "Multi Receipts",
-      icon: FileText,
-      path: "/income/multi-receipts",
-      parentNav: "Income",
-    },
-    {
-      label: "Duplicate Receipt",
-      icon: FileText,
-      path: "/income/duplicate-receipt",
-      parentNav: "Income",
-    },
-    {
-      label: "Cancellation Receipts",
-      icon: FileText,
-      path: "/income/cancellation-receipt",
-      parentNav: "Income",
-    },
+    // {
+    //   label: "Multi Receipts",
+    //   icon: FileText,
+    //   path: "/income/multi-receipts",
+    //   parentNav: "Income",
+    // },
+    // {
+    //   label: "Duplicate Receipt",
+    //   icon: FileText,
+    //   path: "/income/duplicate-receipt",
+    //   parentNav: "Income",
+    // },
+    // {
+    //   label: "Cancellation Receipts",
+    //   icon: FileText,
+    //   path: "/income/cancellation-receipt",
+    //   parentNav: "Income",
+    // },
   ],
 };
 

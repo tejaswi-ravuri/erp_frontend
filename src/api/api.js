@@ -402,20 +402,35 @@ export const feeApi = {
 };
 
 export const incomeApi = {
+  /**
+   * Returns the full { data, meta } envelope (not unwrapped) - when params
+   * includes `page`, `meta` carries { total, page, limit, totalPages } for
+   * pagination; without it, meta is undefined and data is the full match set.
+   */
   async list(params = {}) {
     const { data } = await http.get("/api/income", { params });
-    return data?.data ?? data;
+    return data;
   },
   async create(body) {
     const { data } = await http.post("/api/income", body);
     return data?.data ?? data;
   },
+  /** Saved records only allow editing payment_method - every other field is locked server-side. */
   async update(id, body) {
     const { data } = await http.put(`/api/income/${id}`, body);
     return data?.data ?? data;
   },
-  async remove(id) {
-    const { data } = await http.delete(`/api/income/${id}`);
+  /** Flags the record for deletion - it isn't removed until an Admin Officer approves. */
+  async requestDelete(id) {
+    const { data } = await http.post(`/api/income/${id}/request-delete`);
+    return data?.data ?? data;
+  },
+  async approveDelete(id) {
+    const { data } = await http.post(`/api/income/${id}/approve-delete`);
+    return data?.data ?? data;
+  },
+  async rejectDelete(id) {
+    const { data } = await http.post(`/api/income/${id}/reject-delete`);
     return data?.data ?? data;
   },
 };

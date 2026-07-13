@@ -10,7 +10,15 @@
       "Skill(run)",
       "Skill(run:*)",
       "Bash(npm run *)",
-      "Bash(node --check src/controllers/branchController.js)"
+      "Bash(node --check src/controllers/branchController.js)",
+      "Bash(rm -f esbuild_out.js)",
+      "Bash(node --check src/controllers/incomeController.js)",
+      "Bash(node --check src/models/Income.js)",
+      "Bash(node --check src/models/FeePayment.js)",
+      "Bash(node --check src/controllers/feeController.js)",
+      "Bash(node --check src/routes/incomeRoutes.js)",
+      "Bash(node --check src/models/StudentFeeReport.js)",
+      "Bash(node --check src/routes/studentFeeReportRoutes.js)"
     ]
   }
 }
