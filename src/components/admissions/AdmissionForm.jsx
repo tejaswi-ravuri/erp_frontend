@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { X, Upload, Printer, CheckCircle, Plus, Trash2 } from "lucide-react";
+import { INDIAN_STATES } from "@/lib/constants.js";
 
 const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"];
 const GENDERS = ["Male", "Female", "Other"];
@@ -595,27 +596,38 @@ export default function AdmissionForm({
         />
       </Field>
       <Field label="State" required>
-        <Input
+        <Select
           value={form[which]?.state || ""}
-          onChange={(e) => setAddress(which, "state", e.target.value)}
-          className={`h-8 text-sm ${errors[`${prefix}_state`] ? "border-red-400" : ""}`}
+          onValueChange={(v) => setAddress(which, "state", v)}
           disabled={readOnly}
-        />
+        >
+          <SelectTrigger
+            className={`h-8 text-sm w-full ${errors[`${prefix}_state`] ? "border-red-400" : ""}`}
+          >
+            <SelectValue placeholder="Select state" />
+          </SelectTrigger>
+          <SelectContent>
+            {INDIAN_STATES.map((st) => (
+              <SelectItem key={st} value={st}>
+                {st}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </Field>
       <Field label="Pincode" required>
         <Input
           value={form[which]?.pincode || ""}
-          onChange={(e) => setAddress(which, "pincode", e.target.value)}
+          onChange={(e) =>
+            setAddress(
+              which,
+              "pincode",
+              e.target.value.replace(/\D/g, "").slice(0, 6),
+            )
+          }
+          maxLength={6}
           placeholder="6-digit PIN"
           className={`h-8 text-sm ${errors[`${prefix}_pincode`] ? "border-red-400" : ""}`}
-          disabled={readOnly}
-        />
-      </Field>
-      <Field label="Country" className="col-span-2">
-        <Input
-          value={form[which]?.country || "India"}
-          onChange={(e) => setAddress(which, "country", e.target.value)}
-          className="h-8 text-sm"
           disabled={readOnly}
         />
       </Field>
@@ -688,13 +700,7 @@ export default function AdmissionForm({
                 />
               </Field>
             )}
-            <Field label="State">
-              {sel(
-                "state",
-                ["Telangana", "Andhra Pradesh", "Maharashtra", "Karnataka"],
-                "Select State",
-              )}
-            </Field>
+            <Field label="State">{sel("state", INDIAN_STATES, "Select State")}</Field>
             <Field label="Branch">
               {/* Auto-set to the logged-in accounts manager's own branch -
                   no picker, since this role only ever creates admissions

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useMemo } from "react";
 import * as XLSX from "xlsx";
 import { studentApi } from "@/api/api";
+import { INDIAN_STATES } from "@/lib/constants.js";
 import {
   Dialog,
   DialogContent,
@@ -16,7 +17,10 @@ import { Upload, Download, CheckCircle2, AlertCircle } from "lucide-react";
 // (Student only has one parent_name/parent_phone pair, not a second
 // parent), Adhar Number, Caste, and a split Communication/Permanent
 // Address (schema only has one `address`) - those have been dropped since
-// anything typed into them was silently discarded on save.
+// anything typed into them was silently discarded on save. Country and
+// Status have also been dropped: country is always "India" (schema
+// default), and every imported student is created Active - status is only
+// ever changed afterward via the status popup on the Students page.
 const TEMPLATE_HEADERS = [
   "Admission No",
   "Student Name",
@@ -29,14 +33,12 @@ const TEMPLATE_HEADERS = [
   "Parent Phone",
   "Parent Email",
   "Joining Date",
-  "Status",
   "Address Line 1",
   "Address Line 2",
   "City",
   "District",
   "State",
   "Pincode",
-  "Country",
 ];
 
 // admission_no, full_name, and class are required at the Student level.
@@ -50,7 +52,6 @@ const ADDRESS_HEADERS = [
   "District",
   "State",
   "Pincode",
-  "Country",
 ];
 const REQUIRED_ADDRESS_FIELDS = ["Address Line 1", "City", "State", "Pincode"];
 
@@ -73,21 +74,12 @@ const ADDRESS_FIELD_MAP = {
   District: "district",
   State: "state",
   Pincode: "pincode",
-  Country: "country",
 };
 
 const GENDER_VALUES = ["Male", "Female", "Other"];
 const BLOOD_GROUP_VALUES = ["A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"];
-const STATUS_VALUES = [
-  "Active",
-  "Inactive",
-  "Graduated",
-  "Transferred Out",
-  "Dropped Out",
-  "On Leave",
-  "Alumni",
-];
 const PINCODE_RE = /^[1-9][0-9]{5}$/;
+const PHONE_RE = /^\d{10}$/;
 
 // Sheet values like "Class 5", "Grade 5", or bare "5"/"LKG" all resolve
 // against the real Class docs — case-insensitive, prefix-agnostic.
@@ -209,17 +201,19 @@ export default function StudentBulkUpload({
             rowErrors.push(`invalid Blood Group "${raw["Blood Group"]}"`);
         }
 
-        let status = "Active";
-        if (raw["Status"]) {
-          const matched = matchEnum(raw["Status"], STATUS_VALUES);
-          if (!matched) rowErrors.push(`invalid Status "${raw["Status"]}"`);
-          else status = matched;
+        if (raw["Parent Phone"] && !PHONE_RE.test(raw["Parent Phone"])) {
+          rowErrors.push(`invalid Parent Phone "${raw["Parent Phone"]}"`);
         }
 
         // Address is a structured subdocument, not free text - and it's
-        // only required at all if any address column was filled in.
+        // only required at all if any address column was filled in. State
+        // must match one of INDIAN_STATES (case/space-insensitive) - this
+        // is the spreadsheet equivalent of the State dropdown on the
+        // Add/Edit form. Country isn't a column at all - it's always
+        // "India" (schema default).
         const addressGiven = ADDRESS_HEADERS.some((h) => raw[h]);
         let address = null;
+        let matchedState = null;
         if (addressGiven) {
           const missingAddr = REQUIRED_ADDRESS_FIELDS.filter((f) => !raw[f]);
           if (missingAddr.length > 0) {
@@ -227,10 +221,16 @@ export default function StudentBulkUpload({
           } else if (!PINCODE_RE.test(raw["Pincode"])) {
             rowErrors.push(`invalid Pincode "${raw["Pincode"]}"`);
           } else {
-            address = {};
-            ADDRESS_HEADERS.forEach((h) => {
-              if (raw[h]) address[ADDRESS_FIELD_MAP[h]] = raw[h];
-            });
+            matchedState = matchEnum(raw["State"], INDIAN_STATES);
+            if (!matchedState) {
+              rowErrors.push(`invalid State "${raw["State"]}"`);
+            } else {
+              address = {};
+              ADDRESS_HEADERS.forEach((h) => {
+                if (raw[h]) address[ADDRESS_FIELD_MAP[h]] = raw[h];
+              });
+              address.state = matchedState;
+            }
           }
         }
 
@@ -244,7 +244,6 @@ export default function StudentBulkUpload({
           if (raw[header]) mapped[field] = raw[header];
         });
         mapped.class = matchedClass._id;
-        mapped.status = status;
         if (gender) mapped.gender = gender;
         if (bloodGroup) mapped.blood_group = bloodGroup;
         if (address) mapped.address = address;

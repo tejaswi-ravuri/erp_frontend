@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import StatusBadge from "@/components/bp/StatusBadge";
-import { SUBJECTS } from "@/lib/constants.js";
+import { SUBJECTS, INDIAN_STATES } from "@/lib/constants.js";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const ROLE_OPTIONS = [
@@ -41,6 +41,7 @@ const ROLE_OPTIONS = [
 ];
 
 const PINCODE_RE = /^[1-9][0-9]{5}$/;
+const PHONE_RE = /^\d{10}$/;
 const EMPTY_ADDRESS = {
   line1: "",
   line2: "",
@@ -169,13 +170,15 @@ export default function BPStaff() {
       form.address.city &&
       form.address.state &&
       PINCODE_RE.test(form.address.pincode || ""));
+  const phoneValid = !form.phone || PHONE_RE.test(form.phone);
 
   const canSave =
     form.full_name &&
     form.role &&
     form.email &&
     (editingId || form.password) && // password required only when creating
-    addressValid;
+    addressValid &&
+    phoneValid;
 
   const save = async () => {
     if (!canSave) return;
@@ -684,9 +687,21 @@ export default function BPStaff() {
               </label>
               <Input
                 value={form.phone}
-                onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    phone: e.target.value.replace(/\D/g, "").slice(0, 10),
+                  })
+                }
+                maxLength={10}
+                placeholder="10-digit mobile"
                 className="text-sm"
               />
+              {form.phone && !PHONE_RE.test(form.phone) && (
+                <p className="text-[11px] text-red-500 mt-1">
+                  Must be a valid 10-digit phone number.
+                </p>
+              )}
             </div>
             <div>
               <label className="text-xs font-medium text-slate-600 mb-1 block">
@@ -805,16 +820,26 @@ export default function BPStaff() {
               <label className="text-xs font-medium text-slate-600 mb-1 block">
                 State
               </label>
-              <Input
+              <Select
                 value={form.address.state}
-                onChange={(e) =>
+                onValueChange={(v) =>
                   setForm({
                     ...form,
-                    address: { ...form.address, state: e.target.value },
+                    address: { ...form.address, state: v },
                   })
                 }
-                className="text-sm"
-              />
+              >
+                <SelectTrigger className="text-sm">
+                  <SelectValue placeholder="Select state" />
+                </SelectTrigger>
+                <SelectContent>
+                  {INDIAN_STATES.map((st) => (
+                    <SelectItem key={st} value={st}>
+                      {st}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <label className="text-xs font-medium text-slate-600 mb-1 block">
@@ -825,9 +850,13 @@ export default function BPStaff() {
                 onChange={(e) =>
                   setForm({
                     ...form,
-                    address: { ...form.address, pincode: e.target.value },
+                    address: {
+                      ...form.address,
+                      pincode: e.target.value.replace(/\D/g, "").slice(0, 6),
+                    },
                   })
                 }
+                maxLength={6}
                 placeholder="6-digit PIN"
                 className="text-sm"
               />
@@ -838,21 +867,6 @@ export default function BPStaff() {
                     Must be a valid 6-digit PIN code.
                   </p>
                 )}
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-600 mb-1 block">
-                Country
-              </label>
-              <Input
-                value={form.address.country}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    address: { ...form.address, country: e.target.value },
-                  })
-                }
-                className="text-sm"
-              />
             </div>
           </div>
           <div className="flex justify-end gap-2 mt-4">

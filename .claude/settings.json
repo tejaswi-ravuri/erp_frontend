@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --check src/models/Student.js)",
+      "Bash(node --check src/models/User.js)",
+      "Bash(node --check src/models/_addressSchema.js)",
+      "Bash(node --check src/rbac/permissions.js)",
+      "Bash(node --check src/config/constants.js)",
+      "Bash(npx eslint *)",
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(npm run *)",
+      "Bash(node --check src/controllers/branchController.js)"
+    ]
+  }
+}
