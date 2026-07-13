@@ -39,18 +39,55 @@ import {
   Clock,
 } from "lucide-react";
 import { toast } from "sonner";
+import http from "../api/http";
 
 const AdmissionEnquiry = () => {
   // State for form
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const statesOfIndia = [
+    "Andhra Pradesh",
+    "Arunachal Pradesh",
+    "Assam",
+    "Bihar",
+    "Chhattisgarh",
+    "Goa",
+    "Gujarat",
+    "Haryana",
+    "Himachal Pradesh",
+    "Jharkhand",
+    "Karnataka",
+    "Kerala",
+    "Madhya Pradesh",
+    "Maharashtra",
+    "Manipur",
+    "Meghalaya",
+    "Mizoram",
+    "Nagaland",
+    "Odisha",
+    "Punjab",
+    "Rajasthan",
+    "Sikkim",
+    "Tamil Nadu",
+    "Telangana",
+    "Tripura",
+    "Uttar Pradesh",
+    "Uttarakhand",
+    "West Bengal",
+  ];
+
   const [formData, setFormData] = useState({
     academicYear: "2026-2027",
-    schoolName: "Boduppal",
+    schoolBranch: "",
     studentName: "",
     className: "",
     fatherName: "",
     phoneNo: "",
-    address: "",
+    addressLine1: "",
+    landmark: "",
+    city: "",
+    district: "",
+    state: "",
     previousSchool: "",
     board: "",
     emailId: "",
@@ -113,53 +150,49 @@ const AdmissionEnquiry = () => {
   // Academic years
   const academicYears = ["2026-2027", "2025-2026", "2024-2025"];
 
-  // Load initial data from localStorage
   useEffect(() => {
-    const savedEnquiries = localStorage.getItem("enquiries");
-    if (savedEnquiries) {
-      setEnquiries(JSON.parse(savedEnquiries));
-    } else {
-      // Add sample data if no saved data
-      const sampleData = [
-        {
-          id: "MM20260002",
-          studentName: "SOWJANYA",
-          branch: "Miyapur",
-          mobile: "9874561237",
-          academicYear: "2026-2027",
-          status: "Admitted",
-          date: "11 Jul 2026",
-          fatherName: "Srinivas",
-          className: "VIII Class",
-          board: "CBSE",
-          emailId: "sowjanya@email.com",
-          address: "Miyapur, Hyderabad",
-          previousSchool: "St. Mary's",
-          enquiryType: "Friends",
-          proName: "John Doe",
-        },
-        {
-          id: "MM20260001",
-          studentName: "TEJASWI RAVURI",
-          branch: "Miyapur",
-          mobile: "9963191175",
-          academicYear: "2026-27",
-          status: "Under Review",
-          date: "11 Jul 2026",
-          fatherName: "Ravuri",
-          className: "VII Class",
-          board: "ICSE",
-          emailId: "tejaswi@email.com",
-          address: "Miyapur, Hyderabad",
-          previousSchool: "St. Joseph's",
-          enquiryType: "Advertisement",
-          proName: "Jane Smith",
-        },
-      ];
-      setEnquiries(sampleData);
-      localStorage.setItem("enquiries", JSON.stringify(sampleData));
-    }
+    fetchEnquiries();
   }, []);
+
+  const fetchEnquiries = async () => {
+    try {
+      setIsLoading(true);
+      const response = await http.get("/api/admissions/enquiries");
+      console.log("Fetched enquiries:", response.data);
+
+      if (response.data.success) {
+        const enquiriesData = response.data.data.map((item) => ({
+          ...item,
+          id: item.applicationid || item._id,
+          // Format date for display
+          date: item.date
+            ? new Date(item.date).toLocaleDateString("en-GB", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+              })
+            : new Date().toLocaleDateString("en-GB", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+              }),
+          mobile: item.mobile || item.phoneNo,
+          addressLine1: item.addressLine1 || item.address || "",
+          landmark: item.landmark || "",
+          city: item.city || "",
+          district: item.district || "",
+          state: item.state || "",
+        }));
+        setEnquiries(enquiriesData);
+      } else {
+        toast.error("Failed to fetch Application enquiries");
+      }
+    } catch (error) {
+      console.log("Error fetching enquiries:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Filter and search enquiries
   useEffect(() => {
@@ -217,85 +250,155 @@ const AdmissionEnquiry = () => {
 
   // Generate unique ID
   const generateId = () => {
-    //const count = enquiries.length + 1;
-    // random date string to ensure uniqueness
-    const count = Math.floor(Math.random() * 10000); // Random number between 0 and 9999
+    const count = Math.floor(Math.random() * 10000);
     const year = new Date().getFullYear();
     return `MM${year}${String(count).padStart(4, "0")}`;
   };
 
   // Handle form submission
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     // Validate required fields
     if (
       !formData.studentName ||
       !formData.className ||
       !formData.fatherName ||
-      !formData.phoneNo
+      !formData.phoneNo ||
+      !formData.academicYear ||
+      !formData.schoolBranch ||
+      !formData.board ||
+      !formData.emailId ||
+      !formData.enquiryType ||
+      !formData.proName ||
+      !formData.previousSchool ||
+      !formData.addressLine1 ||
+      !formData.landmark ||
+      !formData.city ||
+      !formData.district ||
+      !formData.state
     ) {
       toast.error("Please fill all required fields");
       return;
     }
+    setIsLoading(true);
 
     const newEnquiry = {
-      id: editingId || generateId(),
+      id: generateId(),
       studentName: formData.studentName,
-      branch: "Boduppal", // Default branch
+      branch: formData.schoolBranch,
       mobile: formData.phoneNo,
       academicYear: formData.academicYear || "2026-2027",
       status: "Under Review",
-      date: new Date().toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      }),
+      date: new Date().toISOString(),
       fatherName: formData.fatherName,
       className: formData.className,
       board: formData.board || "CBSE",
       emailId: formData.emailId,
-      address: formData.address || "",
+      addressLine1: formData.addressLine1 || "",
+      landmark: formData.landmark || "",
+      city: formData.city || "",
+      district: formData.district || "",
+      state: formData.state || "",
       previousSchool: formData.previousSchool || "",
       enquiryType: formData.enquiryType || "",
       proName: formData.proName || "",
     };
 
-    let updatedEnquiries;
-    if (editingId) {
-      // Update existing enquiry
-      updatedEnquiries = enquiries.map((item) =>
-        item.id === editingId ? { ...newEnquiry, id: editingId } : item,
+    try {
+      const response = await http.post(
+        "/api/admissions/addEnquiry",
+        newEnquiry,
       );
-      toast.success("Enquiry updated successfully!");
-    } else {
-      // Add new enquiry
-      updatedEnquiries = [newEnquiry, ...enquiries];
-      toast.success("Enquiry added successfully!");
+      console.log("Backend response:", response.data);
+
+      if (response.data.success) {
+        const responseData = response.data.data;
+
+        let updatedEnquiries;
+        if (editingId) {
+          // Update existing enquiry
+          updatedEnquiries = enquiries.map((item) =>
+            item.id === editingId || item._id === editingId
+              ? {
+                  ...responseData,
+                  id: responseData.applicationid || editingId,
+                  date: responseData.date
+                    ? new Date(responseData.date).toLocaleDateString("en-GB", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                      })
+                    : new Date().toLocaleDateString("en-GB", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                      }),
+                  mobile: responseData.mobile || formData.phoneNo,
+                }
+              : item,
+          );
+          toast.success("Enquiry updated successfully!");
+        } else {
+          // Add new enquiry
+          const newEntry = {
+            ...responseData,
+            // Ensure the UI uses the correct application id immediately (no refresh).
+            id:
+              responseData.applicationid || responseData.id || responseData._id,
+            date: responseData.date
+              ? new Date(responseData.date).toLocaleDateString("en-GB", {
+                  day: "2-digit",
+                  month: "short",
+                  year: "numeric",
+                })
+              : new Date().toLocaleDateString("en-GB", {
+                  day: "2-digit",
+                  month: "short",
+                  year: "numeric",
+                }),
+            mobile: responseData.mobile || formData.phoneNo,
+          };
+
+          updatedEnquiries = [newEntry, ...enquiries];
+          toast.success("Enquiry added successfully!");
+        }
+
+        // Update local state and localStorage
+        setEnquiries(updatedEnquiries);
+      } else {
+        toast.error(response.data.message || "Failed to save enquiry");
+      }
+    } catch (error) {
+      console.error("Error saving enquiry:", error);
+      toast.error(
+        error.response?.data?.message ||
+          "Error saving enquiry. Please try again.",
+      );
+    } finally {
+      // Reset form and close dialog
+      resetForm();
+      setIsDialogOpen(false);
+      setEditingId(null);
+      setIsLoading(false);
     }
-
-    setEnquiries(updatedEnquiries);
-    localStorage.setItem("enquiries", JSON.stringify(updatedEnquiries));
-
-    // Reset form and close dialog
-    resetForm();
-    setIsDialogOpen(false);
-    setEditingId(null);
-
-    // Log the submitted data
-    console.log("Submitted Enquiry Data:", newEnquiry);
   };
 
   // Reset form
   const resetForm = () => {
     setFormData({
       academicYear: "2026-2027",
-      schoolName: "Boduppal",
+      schoolBranch: "",
       studentName: "",
       className: "",
       fatherName: "",
       phoneNo: "",
-      address: "",
+      addressLine1: "",
+      landmark: "",
+      city: "",
+      district: "",
+      state: "",
       previousSchool: "",
       board: "",
+
       emailId: "",
       enquiryType: "",
       proName: "",
@@ -306,46 +409,81 @@ const AdmissionEnquiry = () => {
   const handleEdit = (enquiry) => {
     setFormData({
       academicYear: enquiry.academicYear || "2026-2027",
-      schoolName: enquiry.branch || "Boduppal",
+      schoolBranch: enquiry.branch || "",
       studentName: enquiry.studentName || "",
       className: enquiry.className || "",
       fatherName: enquiry.fatherName || "",
       phoneNo: enquiry.mobile || "",
-      address: enquiry.address || "",
+      addressLine1: enquiry.addressLine1 || "",
+      landmark: enquiry.landmark || "",
+      city: enquiry.city || "",
+      district: enquiry.district || "",
+      state: enquiry.state || "",
       previousSchool: enquiry.previousSchool || "",
+
       board: enquiry.board || "",
       emailId: enquiry.emailId || "",
       enquiryType: enquiry.enquiryType || "",
       proName: enquiry.proName || "",
     });
-    setEditingId(enquiry.id);
+    setEditingId(enquiry._id || enquiry.id || enquiry.applicationid);
     setIsDialogOpen(true);
   };
 
   // Delete enquiry
-  const handleDelete = (id) => {
-    if (window.confirm("Are you sure you want to delete this enquiry?")) {
-      const updatedEnquiries = enquiries.filter((item) => item.id !== id);
-      setEnquiries(updatedEnquiries);
-      localStorage.setItem("enquiries", JSON.stringify(updatedEnquiries));
-      toast.success("Enquiry deleted successfully!");
+  const handleDelete = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this enquiry?")) {
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      // Find the enquiry to get its _id for backend deletion
+      const enquiryToDelete = enquiries.find(
+        (item) =>
+          item.id === id || item._id === id || item.applicationid === id,
+      );
+
+      if (enquiryToDelete) {
+        const deleteId =
+          enquiryToDelete._id || enquiryToDelete.applicationid || id;
+        const response = await http.delete(
+          `/api/admissions/enquiry/${deleteId}`,
+        );
+
+        if (response.data.success) {
+          const updatedEnquiries = enquiries.filter(
+            (item) =>
+              item.id !== id && item._id !== id && item.applicationid !== id,
+          );
+          setEnquiries(updatedEnquiries);
+          localStorage.setItem("enquiries", JSON.stringify(updatedEnquiries));
+          toast.success("Enquiry deleted successfully!");
+        } else {
+          toast.error(response.data.message || "Failed to delete enquiry");
+        }
+      }
+    } catch (error) {
+      console.error("Error deleting enquiry:", error);
+      toast.error(error.response?.data?.message || "Failed to delete enquiry");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   // Convert to admission
-  const handleConvertToAdmission = (enquiry) => {
-    console.log("Converting to Admission:", enquiry);
-
-    // Update status to Admitted
-    const updatedEnquiries = enquiries.map((item) =>
-      item.id === enquiry.id ? { ...item, status: "Admitted" } : item,
-    );
-    setEnquiries(updatedEnquiries);
-    localStorage.setItem("enquiries", JSON.stringify(updatedEnquiries));
-
-    toast.success(
-      `Successfully converted ${enquiry.studentName} to Admission!`,
-    );
+  const handleConvertToAdmission = async (enquiry) => {
+    try {
+      setIsLoading(true);
+      console.log("Converting to Admission:", enquiry);
+    } catch (error) {
+      console.error("Error converting to admission:", error);
+      toast.error(
+        error.response?.data?.message || "Failed to convert to admission",
+      );
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Get status badge
@@ -411,6 +549,7 @@ const AdmissionEnquiry = () => {
             setIsDialogOpen(true);
           }}
           className="bg-blue-600 hover:bg-blue-700 text-white"
+          disabled={isLoading}
         >
           <Plus className="w-4 h-4 mr-2" /> Add Enquiry
         </Button>
@@ -549,9 +688,9 @@ const AdmissionEnquiry = () => {
           <Table>
             <TableHeader>
               <TableRow className="bg-gray-50">
-                {/* <TableHead className="font-semibold text-gray-700">
+                <TableHead className="font-semibold text-gray-700">
                   APP NO.
-                </TableHead> */}
+                </TableHead>
                 <TableHead className="font-semibold text-gray-700">
                   STUDENT NAME
                 </TableHead>
@@ -579,10 +718,18 @@ const AdmissionEnquiry = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {getPaginatedData().length === 0 ? (
+              {isLoading && getPaginatedData().length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={9} className="text-center py-8">
+                    <div className="flex justify-center items-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : getPaginatedData().length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={8}
+                    colSpan={9}
                     className="text-center py-8 text-gray-500"
                   >
                     No enquiries found
@@ -590,10 +737,13 @@ const AdmissionEnquiry = () => {
                 </TableRow>
               ) : (
                 getPaginatedData().map((enquiry) => (
-                  <TableRow key={enquiry.id} className="hover:bg-gray-50">
-                    {/* <TableCell className="font-medium text-blue-600">
-                      {enquiry.id}
-                    </TableCell> */}
+                  <TableRow
+                    key={enquiry._id || enquiry.id}
+                    className="hover:bg-gray-50"
+                  >
+                    <TableCell className="font-medium text-blue-600">
+                      {enquiry.applicationid}
+                    </TableCell>
                     <TableCell>{enquiry.studentName}</TableCell>
                     <TableCell>{enquiry.fatherName}</TableCell>
                     <TableCell>{enquiry.mobile}</TableCell>
@@ -609,6 +759,7 @@ const AdmissionEnquiry = () => {
                           onClick={() => handleConvertToAdmission(enquiry)}
                           className="text-green-600 border-green-200 hover:bg-green-50 hover:text-green-700"
                           title="Convert to Admission"
+                          disabled={isLoading}
                         >
                           <UserPlus className="w-3 h-3" />
                         </Button>
@@ -618,15 +769,19 @@ const AdmissionEnquiry = () => {
                           onClick={() => handleEdit(enquiry)}
                           className="text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700"
                           title="Edit Enquiry"
+                          disabled={isLoading}
                         >
                           <Edit className="w-3 h-3" />
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleDelete(enquiry.id)}
+                          onClick={() =>
+                            handleDelete(enquiry.id || enquiry._id)
+                          }
                           className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
                           title="Delete Enquiry"
+                          disabled={isLoading}
                         >
                           <Trash2 className="w-3 h-3" />
                         </Button>
@@ -695,8 +850,25 @@ const AdmissionEnquiry = () => {
       </div>
 
       {/* Add/Edit Enquiry Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <Dialog
+        open={isDialogOpen}
+        onOpenChange={(nextOpen) => {
+          // Allow closing only when triggered explicitly (Cancel/Submit success
+          // and the built-in dialog close button).
+          setIsDialogOpen(nextOpen);
+        }}
+      >
+        <DialogContent
+          className="max-w-3xl max-h-[90vh] overflow-y-auto"
+          onPointerDownOutside={(e) => {
+            // Prevent close on outside click
+            e.preventDefault();
+          }}
+          onEscapeKeyDown={(e) => {
+            // Prevent close on ESC
+            e.preventDefault();
+          }}
+        >
           <DialogHeader>
             <DialogTitle className="text-xl font-bold">
               {editingId ? "Edit Enquiry" : "Add New Enquiry"}
@@ -732,20 +904,29 @@ const AdmissionEnquiry = () => {
 
             <div>
               <Label
-                htmlFor="schoolName"
+                htmlFor="schoolBranch"
                 className="text-sm font-medium text-gray-700"
               >
-                School Name
+                School Branch
               </Label>
-              <Input
-                id="schoolName"
-                value={formData.schoolName}
-                onChange={(e) =>
-                  handleInputChange("schoolName", e.target.value)
+              <Select
+                id="schoolBranch"
+                value={formData.schoolBranch}
+                onValueChange={(value) =>
+                  handleInputChange("schoolBranch", value)
                 }
-                className="mt-1"
-                placeholder="Enter School Name"
-              />
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select School Branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  {branchOptions.map((branch) => (
+                    <SelectItem key={branch} value={branch}>
+                      {branch}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div>
@@ -830,18 +1011,96 @@ const AdmissionEnquiry = () => {
 
             <div className="md:col-span-2">
               <Label
-                htmlFor="address"
+                htmlFor="addressLine1"
                 className="text-sm font-medium text-gray-700"
               >
-                Address
+                Address (Line 1) *
               </Label>
               <Input
-                id="address"
-                value={formData.address}
-                onChange={(e) => handleInputChange("address", e.target.value)}
+                id="addressLine1"
+                value={formData.addressLine1}
+                onChange={(e) =>
+                  handleInputChange("addressLine1", e.target.value)
+                }
                 className="mt-1"
                 placeholder="Enter Address"
+                required
               />
+            </div>
+
+            <div>
+              <Label
+                htmlFor="landmark"
+                className="text-sm font-medium text-gray-700"
+              >
+                Landmark *
+              </Label>
+              <Input
+                id="landmark"
+                value={formData.landmark}
+                onChange={(e) => handleInputChange("landmark", e.target.value)}
+                className="mt-1"
+                placeholder="Enter Landmark"
+                required
+              />
+            </div>
+
+            <div>
+              <Label
+                htmlFor="city"
+                className="text-sm font-medium text-gray-700"
+              >
+                City *
+              </Label>
+              <Input
+                id="city"
+                value={formData.city}
+                onChange={(e) => handleInputChange("city", e.target.value)}
+                className="mt-1"
+                placeholder="Enter City"
+                required
+              />
+            </div>
+
+            <div>
+              <Label
+                htmlFor="district"
+                className="text-sm font-medium text-gray-700"
+              >
+                District *
+              </Label>
+              <Input
+                id="district"
+                value={formData.district}
+                onChange={(e) => handleInputChange("district", e.target.value)}
+                className="mt-1"
+                placeholder="Enter District"
+                required
+              />
+            </div>
+
+            <div>
+              <Label
+                htmlFor="state"
+                className="text-sm font-medium text-gray-700"
+              >
+                State *
+              </Label>
+              <Select
+                value={formData.state}
+                onValueChange={(value) => handleInputChange("state", value)}
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select State" />
+                </SelectTrigger>
+                <SelectContent>
+                  {statesOfIndia.map((st) => (
+                    <SelectItem key={st} value={st}>
+                      {st}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div>
@@ -849,7 +1108,7 @@ const AdmissionEnquiry = () => {
                 htmlFor="previousSchool"
                 className="text-sm font-medium text-gray-700"
               >
-                Previous School
+                Previous School *
               </Label>
               <Input
                 id="previousSchool"
@@ -859,6 +1118,7 @@ const AdmissionEnquiry = () => {
                 }
                 className="mt-1"
                 placeholder="Enter Previous School"
+                required
               />
             </div>
 
@@ -867,7 +1127,7 @@ const AdmissionEnquiry = () => {
                 htmlFor="board"
                 className="text-sm font-medium text-gray-700"
               >
-                Board
+                Board *
               </Label>
               <Select
                 value={formData.board}
@@ -891,8 +1151,9 @@ const AdmissionEnquiry = () => {
                 htmlFor="emailId"
                 className="text-sm font-medium text-gray-700"
               >
-                Email Id
+                Email Id *
               </Label>
+
               <Input
                 id="emailId"
                 type="email"
@@ -900,6 +1161,7 @@ const AdmissionEnquiry = () => {
                 onChange={(e) => handleInputChange("emailId", e.target.value)}
                 className="mt-1"
                 placeholder="Enter Email Id"
+                required
               />
             </div>
 
@@ -908,8 +1170,9 @@ const AdmissionEnquiry = () => {
                 htmlFor="enquiryType"
                 className="text-sm font-medium text-gray-700"
               >
-                Enquiry Type
+                Enquiry Type *
               </Label>
+
               <Select
                 value={formData.enquiryType}
                 onValueChange={(value) =>
@@ -934,7 +1197,7 @@ const AdmissionEnquiry = () => {
                 htmlFor="proName"
                 className="text-sm font-medium text-gray-700"
               >
-                Pro Name
+                Pro Name *
               </Label>
               <Input
                 id="proName"
@@ -942,6 +1205,7 @@ const AdmissionEnquiry = () => {
                 onChange={(e) => handleInputChange("proName", e.target.value)}
                 className="mt-1"
                 placeholder="Enter Pro Name"
+                required
               />
             </div>
           </div>
@@ -954,14 +1218,25 @@ const AdmissionEnquiry = () => {
                 resetForm();
                 setEditingId(null);
               }}
+              disabled={isLoading}
             >
               Cancel
             </Button>
             <Button
               onClick={handleSubmit}
               className="bg-blue-600 hover:bg-blue-700 text-white"
+              disabled={isLoading}
             >
-              {editingId ? "Update Enquiry" : "Submit Enquiry"}
+              {isLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  {editingId ? "Updating..." : "Submitting..."}
+                </>
+              ) : editingId ? (
+                "Update Enquiry"
+              ) : (
+                "Submit Enquiry"
+              )}
             </Button>
           </div>
         </DialogContent>
