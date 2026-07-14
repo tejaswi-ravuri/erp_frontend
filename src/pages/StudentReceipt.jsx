@@ -241,14 +241,26 @@ export default function StudentReceipt() {
     const pageW = 297; // A4 landscape width
     const receiptWidth = 140; // Each receipt width
     const gap = 10; // Gap between receipts
-    const logoUrl =
-      "https://media.base44.com/images/public/69fd69a017bf1eb27462604f/280b8ac37_logo.jpg";
+    const logoUrl = "/logo.webp";
 
-    // Load logo image
+    // Load logo image - drawn through a <canvas> and re-encoded as PNG
+    // since jsPDF's own WEBP decoding is unreliable across versions;
+    // every browser can already decode WEBP into a canvas natively.
     const logoImg = new Image();
-    logoImg.crossOrigin = "anonymous";
+    let logoDataUrl = null;
     const logoPromise = new Promise((resolve) => {
-      logoImg.onload = () => resolve(true);
+      logoImg.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = logoImg.naturalWidth;
+          canvas.height = logoImg.naturalHeight;
+          canvas.getContext("2d").drawImage(logoImg, 0, 0);
+          logoDataUrl = canvas.toDataURL("image/png");
+        } catch {
+          logoDataUrl = null;
+        }
+        resolve(true);
+      };
       logoImg.onerror = () => resolve(false);
       logoImg.src = logoUrl;
     });
@@ -263,11 +275,13 @@ export default function StudentReceipt() {
       const centerX = startX + receiptWidth / 2;
 
       // Add large logo in header area (89% opacity)
-      try {
-        doc.setGState(new doc.GState({ opacity: 0.89 }));
-        doc.addImage(logoImg, "JPEG", centerX - 35, y + 5, 70, 28);
-        doc.setGState(new doc.GState({ opacity: 1 }));
-      } catch (e) {}
+      if (logoDataUrl) {
+        try {
+          doc.setGState(new doc.GState({ opacity: 0.89 }));
+          doc.addImage(logoDataUrl, "PNG", centerX - 35, y + 5, 70, 28);
+          doc.setGState(new doc.GState({ opacity: 1 }));
+        } catch (e) {}
+      }
 
       // Fee Receipt title
       y += 35;

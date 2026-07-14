@@ -43,8 +43,7 @@ const CLASSES = [
 ];
 const ACADEMIC_YEARS = ["2024-25", "2025-26", "2026-27"];
 
-const logoUrl =
-  "https://media.base44.com/images/public/69fd69a017bf1eb27462604f/280b8ac37_logo.jpg";
+const logoUrl = "/logo.webp";
 
 const EMPTY_SUBJECT = {
   subject: "",
@@ -120,21 +119,36 @@ export default function HallTicket() {
     });
     const pageW = 210;
 
-    // Load logo
+    // Load logo - drawn through a <canvas> and re-encoded as PNG since
+    // jsPDF's own WEBP decoding is unreliable across versions; every
+    // browser can already decode WEBP into a canvas natively.
     const logoImg = new Image();
-    logoImg.crossOrigin = "anonymous";
+    let logoDataUrl = null;
     await new Promise((res) => {
-      logoImg.onload = res;
+      logoImg.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = logoImg.naturalWidth;
+          canvas.height = logoImg.naturalHeight;
+          canvas.getContext("2d").drawImage(logoImg, 0, 0);
+          logoDataUrl = canvas.toDataURL("image/png");
+        } catch {
+          logoDataUrl = null;
+        }
+        res();
+      };
       logoImg.onerror = res;
       logoImg.src = logoUrl;
     });
 
     // Header
-    try {
-      doc.setGState(new doc.GState({ opacity: 0.9 }));
-      doc.addImage(logoImg, "JPEG", pageW / 2 - 35, 8, 70, 22);
-      doc.setGState(new doc.GState({ opacity: 1 }));
-    } catch (e) {}
+    if (logoDataUrl) {
+      try {
+        doc.setGState(new doc.GState({ opacity: 0.9 }));
+        doc.addImage(logoDataUrl, "PNG", pageW / 2 - 35, 8, 70, 22);
+        doc.setGState(new doc.GState({ opacity: 1 }));
+      } catch (e) {}
+    }
 
     let y = 36;
     doc.setLineWidth(0.8);

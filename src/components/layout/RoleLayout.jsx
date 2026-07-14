@@ -72,7 +72,7 @@ const NAV_BY_ROLE = {
     },
     { label: "Income", icon: TrendingUp, path: "/income" },
     { label: "Expenditure", icon: TrendingDown, path: "/expenditure" },
-    { label: "Analytics", icon: BarChart2, path: "/analytics" },
+    { label: "Tracking Expenses", icon: BarChart2, path: "/tracking-expenses" },
   ],
 };
 
@@ -103,12 +103,12 @@ const SUB_NAV_BY_ROLE = {
     //   path: "/income/multi-receipts",
     //   parentNav: "Income",
     // },
-    // {
-    //   label: "Duplicate Receipt",
-    //   icon: FileText,
-    //   path: "/income/duplicate-receipt",
-    //   parentNav: "Income",
-    // },
+    {
+      label: "Duplicate Receipts",
+      icon: FileText,
+      path: "/fees/duplicate-receipts",
+      parentNav: "Fee Payments",
+    },
     // {
     //   label: "Cancellation Receipts",
     //   icon: FileText,

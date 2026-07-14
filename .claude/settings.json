@@ -18,7 +18,10 @@
       "Bash(node --check src/controllers/feeController.js)",
       "Bash(node --check src/routes/incomeRoutes.js)",
       "Bash(node --check src/models/StudentFeeReport.js)",
-      "Bash(node --check src/routes/studentFeeReportRoutes.js)"
+      "Bash(node --check src/routes/studentFeeReportRoutes.js)",
+      "Bash(cd \"c:\\\\Users\\\\Tejaswi\\\\Desktop\\\\Tejaswi\\\\Freelance projects\\\\MastermindsFullcode\" && echo \"---entityClient---\" && find masterminds/src/api -iname \"*.js\" && echo \"---search entities. usage---\" && grep -rln \"entities\\\\.\" masterminds/src --include=*.jsx --include=*.js)",
+      "Read(//c/Users/Tejaswi/Desktop/Tejaswi/Freelance projects/MastermindsFullcode/**)",
+      "Bash(npx vite *)"
     ]
   }
 }

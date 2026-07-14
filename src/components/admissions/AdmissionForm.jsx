@@ -198,43 +198,24 @@ function LetterBoxInput({ value, onChange, maxLength = 30 }) {
   );
 }
 
+// Single formatted input (not boxes + a duplicate hidden field) - digits
+// are grouped as "XXXX XXXX XXXX" for readability while typing, but it's
+// one plain input the user can click/select/edit normally.
 function AadhaarInput({ value, onChange }) {
   const digits = (value || "").replace(/\D/g, "").slice(0, 12);
-  const g1 = digits.slice(0, 4);
-  const g2 = digits.slice(4, 8);
-  const g3 = digits.slice(8, 12);
-  const inputRef = useRef(null);
+  const formatted = digits.replace(/(\d{4})(?=\d)/g, "$1 ");
   return (
-    <div
-      className="flex items-center gap-2"
-      onClick={() => inputRef.current?.focus()}
-    >
-      {[g1, g2, g3].map((g, i) => (
-        <React.Fragment key={i}>
-          <div className="flex gap-0.5">
-            {Array.from({ length: 4 }).map((_, j) => (
-              <div
-                key={j}
-                className={`w-7 h-8 border rounded flex items-center justify-center text-sm font-mono font-semibold ${g[j] ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-300 bg-slate-50 text-slate-800"}`}
-              >
-                {g[j] || ""}
-              </div>
-            ))}
-          </div>
-          {i < 2 && <span className="text-slate-400 font-bold">—</span>}
-        </React.Fragment>
-      ))}
-      <Input
-        ref={inputRef}
-        type="text"
-        value={digits}
-        onChange={(e) =>
-          onChange(e.target.value.replace(/\D/g, "").slice(0, 12))
-        }
-        className="h-8 text-sm w-36 ml-2"
-        placeholder="Type 12 digits"
-      />
-    </div>
+    <Input
+      type="text"
+      inputMode="numeric"
+      value={formatted}
+      onChange={(e) =>
+        onChange(e.target.value.replace(/\D/g, "").slice(0, 12))
+      }
+      maxLength={14}
+      placeholder="XXXX XXXX XXXX"
+      className="h-9 text-sm font-mono tracking-wider w-48"
+    />
   );
 }
 
@@ -302,10 +283,12 @@ export default function AdmissionForm({
   );
 
   // Lock the form's branch to the user's own branch on CREATE only -
-  // never on edit, so opening an existing admission never silently
-  // rewrites which branch it belongs to.
+  // never on edit, so opening an existing (already-persisted) admission
+  // never silently rewrites which branch it belongs to. A prefill object
+  // coming from "Convert to Admission" (application data with no _id yet)
+  // still counts as CREATE here, so it must also get auto-branched.
   useEffect(() => {
-    if (!admission && resolvedBranchId) {
+    if (!admission?._id && resolvedBranchId) {
       set("branch", resolvedBranchId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -658,13 +641,16 @@ export default function AdmissionForm({
       >
         {isModelView && (
           <div className="sticky top-0 z-10 bg-white rounded-t-2xl border-b border-slate-200 px-6 py-3 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">
-                The Masterminds School
-              </p>
-              <h2 className="text-base font-bold text-slate-800">
-                Provisional Application for Admission
-              </h2>
+            <div className="flex items-center gap-3">
+              <img src="/logo.webp" alt="The Masterminds School" className="h-8 w-auto" />
+              <div>
+                <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">
+                  The Masterminds School
+                </p>
+                <h2 className="text-base font-bold text-slate-800">
+                  Provisional Application for Admission
+                </h2>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <button

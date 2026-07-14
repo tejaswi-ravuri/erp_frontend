@@ -96,6 +96,10 @@ const AuthenticatedApp = () => {
         <Route path="/attendance" element={<BPAttendance />} />
         <Route path="/marks" element={<BPMarks />} />
         <Route path="/fees" element={<BPFees />} />
+        <Route
+          path="/fees/duplicate-receipts"
+          element={<DuplicateReceipt />}
+        />
         <Route path="/expenditure" element={<BPExpenditure />} />
         <Route path="/accounts" element={<BPAccounts />} />
         <Route path="/student-fee-report" element={<StudentFeeReport />} />
@@ -108,10 +112,6 @@ const AuthenticatedApp = () => {
         <Route path="/homework-manager" element={<HomeworkManager />} />
         <Route path="/income" element={<BPIncome />} />
         <Route path="/income/multi-receipts" element={<MultiReceipts />} />
-        <Route
-          path="/income/duplicate-receipt"
-          element={<DuplicateReceipt />}
-        />
         <Route
           path="/income/cancellation-receipt"
           element={<IncomeCancellationRequest />}

@@ -109,6 +109,10 @@ export default function BPFees() {
   const [saving, setSaving] = useState(false);
   const [remindedIds, setRemindedIds] = useState(new Set());
   const [selectedIds, setSelectedIds] = useState(new Set());
+  // Set right after a successful collectPayment() - while truthy, the Add
+  // Payment dialog shows a "Print Receipt" confirmation instead of the
+  // input form, so staff can print an Office+Parent copy before closing.
+  const [justCollected, setJustCollected] = useState(null);
 
   // `background: true` is used by the 10s poll below - it refreshes
   // `fees` in place without touching `loading`, so a silent sync never
@@ -243,12 +247,16 @@ export default function BPFees() {
         payload.bank_branch = form.bank_branch;
       }
 
-      await feeApi.collectPayment(payload);
+      const { payments } = await feeApi.collectPayment(payload);
       toast({
         title: "Payment recorded",
         description: `₹${totalRowsAmount.toLocaleString("en-IN")} recorded for ${form.student_name}.`,
       });
-      closeForm();
+      setJustCollected({
+        payments: payments || [],
+        student_name: form.student_name,
+        total: totalRowsAmount,
+      });
       load();
     } catch (err) {
       toast({
@@ -267,6 +275,7 @@ export default function BPFees() {
     setSelectedClassId("");
     setEligibleStudents([]);
     setFeeReport(null);
+    setJustCollected(null);
   };
 
   const setField = (key, value) => setForm((f) => ({ ...f, [key]: value }));
@@ -594,6 +603,31 @@ export default function BPFees() {
           <DialogHeader>
             <DialogTitle>Add Fee Payment</DialogTitle>
           </DialogHeader>
+          {justCollected ? (
+            <div className="mt-2 space-y-4">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-sm text-emerald-800 flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 shrink-0" />
+                Payment of ₹{justCollected.total.toLocaleString("en-IN")}{" "}
+                recorded for {justCollected.student_name}.
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={closeForm}>
+                  Done
+                </Button>
+                <Button
+                  onClick={() =>
+                    printFeeReceipt(justCollected.payments, [], {
+                      copies: ["Parent Copy", "Office Copy"],
+                    })
+                  }
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5"
+                >
+                  <Printer className="w-4 h-4" /> Print Receipt
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
           <div className="grid grid-cols-2 gap-3 mt-2">
             {/* Step 1 - Class */}
             <div className="col-span-2">
@@ -991,6 +1025,8 @@ export default function BPFees() {
               {saving ? "Saving..." : "Save"}
             </Button>
           </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>

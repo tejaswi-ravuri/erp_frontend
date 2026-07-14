@@ -273,29 +273,33 @@ function ApplicationForm() {
   const handleConvertToAdmission = async (application) => {
     const updatedApplicationInfo = {
       academic_year: application.academicYear,
-      // application_no: application.applicationNo,
       student_name: application.studentName,
       father_name: application.fatherName,
+      father_mobile: application.mobileNo,
       same_as_communication: application.isPermanentSameAsCommunication,
       communication_address: {
         line1: application.commAddressLine1,
-        line2: "",
+        line2: application.commLandmark || "",
         city: application.commCity,
         district: application.commDistrict,
         state: application.commState,
       },
       permanent_address: {
         line1: application.permenantAddressLine1,
-        line2: "",
+        line2: application.permenantLandmark || "",
         city: application.permenantCity,
         district: application.permenantDistrict,
         state: application.permenantState,
       },
+      previous_schools: application.previousSchool
+        ? [{ name: application.previousSchool, standard: "", year: "" }]
+        : [],
       saleOfApplicationId: application._id,
     };
     navigate("/admissions/admission-form", {
       state: {
         admissionData: updatedApplicationInfo,
+        fromApplication: true,
       },
     });
   };
