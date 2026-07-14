@@ -15,7 +15,7 @@ import TeacherDashboard from "@/pages/dashboards/TeacherDashboard";
 import PrincipalDashboard from "@/pages/dashboards/PrincipalDashboard";
 import AccountsManagerDashboard from "./pages/dashboards/AccountsManagerDashboard";
 import AdmissionEnquiry from "@/pages/AdmissionEnquiry";
-import AdmissionForm from "@/pages/AdmissionForm";
+import AdmissionForm from "@/pages/OpenAdmissionForm";
 import ApplicationForm from "@/pages/ApplicationForm";
 import MultiReceipts from "@/pages/MultiReceipts";
 import DuplicateReceipt from "@/pages/DuplicateReceipts";

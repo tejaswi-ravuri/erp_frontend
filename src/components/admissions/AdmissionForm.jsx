@@ -244,6 +244,7 @@ export default function AdmissionForm({
   onClose,
   onSaved,
   onAdmit,
+  isModelView = true,
 }) {
   const { user } = useAuth();
 
@@ -443,6 +444,9 @@ export default function AdmissionForm({
     height_cm: parseFloat(form.height_cm) || 0,
     weight_kg: parseFloat(form.weight_kg) || 0,
     fee_payable_amount: parseFloat(form.fee_payable_amount) || 0,
+    saleOfApplicationId: form?.saleOfApplicationId
+      ? form?.saleOfApplicationId
+      : "",
   });
 
   const handleSaveDraft = async () => {
@@ -640,33 +644,45 @@ export default function AdmissionForm({
   const alreadyConverted = !!admission?.student_id;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 py-6 px-4">
-      <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl">
-        <div className="sticky top-0 z-10 bg-white rounded-t-2xl border-b border-slate-200 px-6 py-3 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">
-              The Masterminds School
-            </p>
-            <h2 className="text-base font-bold text-slate-800">
-              Provisional Application for Admission
-            </h2>
+    <div
+      className={
+        isModelView
+          ? "fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 py-6 px-4"
+          : ""
+      }
+    >
+      <div
+        className={
+          isModelView ? "bg-white w-full max-w-5xl rounded-2xl shadow-2xl" : ""
+        }
+      >
+        {isModelView && (
+          <div className="sticky top-0 z-10 bg-white rounded-t-2xl border-b border-slate-200 px-6 py-3 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">
+                The Masterminds School
+              </p>
+              <h2 className="text-base font-bold text-slate-800">
+                Provisional Application for Admission
+              </h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handlePrint}
+                className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 no-print"
+                title="Print"
+              >
+                <Printer className="w-4 h-4" />
+              </button>
+              <button
+                onClick={onClose}
+                className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handlePrint}
-              className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 no-print"
-              title="Print"
-            >
-              <Printer className="w-4 h-4" />
-            </button>
-            <button
-              onClick={onClose}
-              className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
+        )}
 
         <div className="p-6 space-y-6">
           {/* TOP HEADER FIELDS */}
@@ -700,7 +716,9 @@ export default function AdmissionForm({
                 />
               </Field>
             )}
-            <Field label="State">{sel("state", INDIAN_STATES, "Select State")}</Field>
+            <Field label="State">
+              {sel("state", INDIAN_STATES, "Select State")}
+            </Field>
             <Field label="Branch">
               {/* Auto-set to the logged-in accounts manager's own branch -
                   no picker, since this role only ever creates admissions
@@ -1334,40 +1352,54 @@ export default function AdmissionForm({
         </div>
 
         {/* Sticky Footer */}
-        <div className="sticky bottom-0 bg-white border-t border-slate-200 rounded-b-2xl px-6 py-3 flex items-center justify-between gap-3 no-print">
-          <Button variant="outline" onClick={onClose}>
-            Close
-          </Button>
-          {!readOnly && (
-            <div className="flex items-center gap-2">
+        {!isModelView ? (
+          <div className="flex justify-end">
+            {!isUnderReview && (
               <Button
-                variant="outline"
-                onClick={handleSaveDraft}
+                onClick={handleSubmit}
                 disabled={saving}
+                className="bg-indigo-600 hover:bg-indigo-700"
               >
-                {saving ? "Saving..." : "Save as Draft"}
+                {saving ? "Submitting..." : "Submit Application"}
               </Button>
-              {isUnderReview && !alreadyConverted && (
+            )}
+          </div>
+        ) : (
+          <div className="sticky bottom-0 bg-white border-t border-slate-200 rounded-b-2xl px-6 py-3 flex items-center justify-between gap-3 no-print">
+            <Button variant="outline" onClick={onClose}>
+              Close
+            </Button>
+            {!readOnly && (
+              <div className="flex items-center gap-2">
                 <Button
-                  onClick={handleAdmit}
+                  variant="outline"
+                  onClick={handleSaveDraft}
                   disabled={saving}
-                  className="bg-green-600 hover:bg-green-700 gap-1"
                 >
-                  <CheckCircle className="w-4 h-4" /> Admit Student
+                  {saving ? "Saving..." : "Save as Draft"}
                 </Button>
-              )}
-              {!isUnderReview && (
-                <Button
-                  onClick={handleSubmit}
-                  disabled={saving}
-                  className="bg-indigo-600 hover:bg-indigo-700"
-                >
-                  {saving ? "Submitting..." : "Submit Application"}
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
+                {isUnderReview && !alreadyConverted && (
+                  <Button
+                    onClick={handleAdmit}
+                    disabled={saving}
+                    className="bg-green-600 hover:bg-green-700 gap-1"
+                  >
+                    <CheckCircle className="w-4 h-4" /> Admit Student
+                  </Button>
+                )}
+                {!isUnderReview && (
+                  <Button
+                    onClick={handleSubmit}
+                    disabled={saving}
+                    className="bg-indigo-600 hover:bg-indigo-700"
+                  >
+                    {saving ? "Submitting..." : "Submit Application"}
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
