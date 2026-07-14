@@ -471,21 +471,6 @@ const AdmissionEnquiry = () => {
     }
   };
 
-  // Convert to admission
-  const handleConvertToAdmission = async (enquiry) => {
-    try {
-      setIsLoading(true);
-      console.log("Converting to Admission:", enquiry);
-    } catch (error) {
-      console.error("Error converting to admission:", error);
-      toast.error(
-        error.response?.data?.message || "Failed to convert to admission",
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   // Get status badge
   const getStatusBadge = (status) => {
     switch (status) {
@@ -756,16 +741,6 @@ const AdmissionEnquiry = () => {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleConvertToAdmission(enquiry)}
-                          className="text-green-600 border-green-200 hover:bg-green-50 hover:text-green-700"
-                          title="Convert to Admission"
-                          disabled={isLoading}
-                        >
-                          <UserPlus className="w-3 h-3" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
                           onClick={() => handleEdit(enquiry)}
                           className="text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700"
                           title="Edit Enquiry"
@@ -807,7 +782,7 @@ const AdmissionEnquiry = () => {
                 value={String(itemsPerPage)}
                 onValueChange={(value) => setItemsPerPage(Number(value))}
               >
-                <SelectTrigger className="w-[100px]">
+                <SelectTrigger className="w-25">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
