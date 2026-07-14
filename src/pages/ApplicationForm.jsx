@@ -3,6 +3,7 @@ import { Plus, Edit, Trash2, X, UserPlus } from "lucide-react";
 import http from "../api/http";
 import { Button } from "../components/ui/button";
 import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
 
 function ApplicationForm() {
   const STATES_28 = useMemo(
@@ -58,6 +59,7 @@ function ApplicationForm() {
   const [applications, setApplications] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const navigate = useNavigate();
 
   const defaultAcademicYear = "2026-2027";
 
@@ -269,14 +271,33 @@ function ApplicationForm() {
   };
 
   const handleConvertToAdmission = async (application) => {
-    try {
-      console.log("Converting to Admission:", application);
-    } catch (error) {
-      console.log("Error converting to admission:", error);
-      toast.error(
-        error.response?.data?.message || "Failed to convert to admission",
-      );
-    }
+    const updatedApplicationInfo = {
+      academic_year: application.academicYear,
+      // application_no: application.applicationNo,
+      student_name: application.studentName,
+      father_name: application.fatherName,
+      same_as_communication: application.isPermanentSameAsCommunication,
+      communication_address: {
+        line1: application.commAddressLine1,
+        line2: "",
+        city: application.commCity,
+        district: application.commDistrict,
+        state: application.commState,
+      },
+      permanent_address: {
+        line1: application.permenantAddressLine1,
+        line2: "",
+        city: application.permenantCity,
+        district: application.permenantDistrict,
+        state: application.permenantState,
+      },
+      saleOfApplicationId: application._id,
+    };
+    navigate("/admissions/admission-form", {
+      state: {
+        admissionData: updatedApplicationInfo,
+      },
+    });
   };
 
   const handleDelete = async (id) => {
@@ -811,15 +832,17 @@ function ApplicationForm() {
                     </td>
                     <td className="px-4 py-3 text-center">
                       <div className="flex justify-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-green-600 border-green-200 hover:bg-green-50 hover:text-green-700"
-                          title="Convert to Admission"
-                          onClick={() => handleConvertToAdmission(app)}
-                        >
-                          <UserPlus className="w-3 h-3" />
-                        </Button>
+                        {!app.isAdmitted && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-green-600 border-green-200 hover:bg-green-50 hover:text-green-700"
+                            title="Convert to Admission"
+                            onClick={() => handleConvertToAdmission(app)}
+                          >
+                            <UserPlus className="w-3 h-3" />
+                          </Button>
+                        )}
                         <button
                           onClick={() => openEditModal(app._id || app.id)}
                           className="p-1 text-blue-600 hover:bg-blue-50 rounded transition-colors"
