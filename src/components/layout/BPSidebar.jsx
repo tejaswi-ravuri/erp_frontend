@@ -42,7 +42,7 @@ const navItems = [
     icon: TrendingDown,
     children: [
       { label: "Expenditure List", path: "/expenditure" },
-      { label: "Tracking Expenses", path: "/tracking-expenses" },
+      { label: "Financial Report", path: "/financial-report" },
     ],
   },
   { label: "Accounts", icon: Wallet, path: "/accounts" },

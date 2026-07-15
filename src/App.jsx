@@ -96,16 +96,13 @@ const AuthenticatedApp = () => {
         <Route path="/attendance" element={<BPAttendance />} />
         <Route path="/marks" element={<BPMarks />} />
         <Route path="/fees" element={<BPFees />} />
-        <Route
-          path="/fees/duplicate-receipts"
-          element={<DuplicateReceipt />}
-        />
+        <Route path="/fees/duplicate-receipts" element={<DuplicateReceipt />} />
         <Route path="/expenditure" element={<BPExpenditure />} />
         <Route path="/accounts" element={<BPAccounts />} />
         <Route path="/student-fee-report" element={<StudentFeeReport />} />
         <Route path="/analytics" element={<BPAnalytics />} />
         <Route path="/report-cards" element={<BPReportCard />} />
-        <Route path="/tracking-expenses" element={<BPTrackingExpenses />} />
+        <Route path="/financial-report" element={<BPTrackingExpenses />} />
         <Route path="/bus-fee-report" element={<BusFeeReport />} />
         <Route path="/student-receipt" element={<StudentReceipt />} />
         <Route path="/hall-ticket" element={<HallTicket />} />

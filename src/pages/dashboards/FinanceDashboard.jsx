@@ -263,7 +263,7 @@ export default function FinanceDashboard() {
               sub={`₹${formatNumber(displayStats?.total_expenditure || 0)}`}
               icon={TrendingDown}
               color="bg-red-600"
-              onClick={() => navigate("/tracking-expenses")}
+              onClick={() => navigate("/financial-report")}
             />
             <StatCard
               label="Net Balance"
@@ -401,7 +401,7 @@ export default function FinanceDashboard() {
         {/* Quick Action Buttons */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <button
-            onClick={() => navigate("/tracking-expenses")}
+            onClick={() => navigate("/financial-report")}
             className="bg-gradient-to-br from-indigo-600 to-indigo-700 text-white rounded-xl p-6 font-semibold hover:shadow-lg transition-all hover:-translate-y-1 text-left flex items-end justify-between min-h-24"
           >
             <div>

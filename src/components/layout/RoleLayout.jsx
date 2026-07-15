@@ -36,7 +36,7 @@ const NAV_BY_ROLE = {
       path: "/student-fee-report",
     },
     { label: "Expenditure", icon: TrendingDown, path: "/expenditure" },
-    { label: "Tracking Expenses", icon: BarChart2, path: "/tracking-expenses" },
+    { label: "Financial Report", icon: BarChart2, path: "/financial-report" },
     { label: "Accounts", icon: Wallet, path: "/accounts" },
   ],
   teacher: [
@@ -72,7 +72,7 @@ const NAV_BY_ROLE = {
     },
     { label: "Income", icon: TrendingUp, path: "/income" },
     { label: "Expenditure", icon: TrendingDown, path: "/expenditure" },
-    { label: "Tracking Expenses", icon: BarChart2, path: "/tracking-expenses" },
+    { label: "Financial Report", icon: BarChart2, path: "/financial-report" },
   ],
 };
 

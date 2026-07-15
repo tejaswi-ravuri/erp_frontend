@@ -22,7 +22,8 @@ import { incomeApi, expenditureApi, feeApi, branchApi } from "@/api/api";
 import { toast } from "sonner";
 
 const pad2 = (n) => String(n).padStart(2, "0");
-const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const ymd = (d) =>
+  `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
 const todayStr = () => ymd(new Date());
 const firstOfMonthStr = () => {
@@ -288,7 +289,7 @@ export default function BPTrackingExpenses() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-slate-800">
-            Tracking Expenses
+            Financial Report
           </h2>
           <p className="text-sm text-slate-500">
             Income vs expenditure report — live from Fee Payments, Income and
@@ -548,9 +549,7 @@ export default function BPTrackingExpenses() {
             <>
               <div className="divide-y divide-slate-100">
                 {loading ? (
-                  <p className="px-5 py-4 text-sm text-slate-400">
-                    Loading…
-                  </p>
+                  <p className="px-5 py-4 text-sm text-slate-400">Loading…</p>
                 ) : expenditureBreakdown.length === 0 ? (
                   <p className="px-5 py-4 text-sm text-slate-400">
                     No expenditure for this period.
