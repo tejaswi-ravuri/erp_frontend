@@ -19,21 +19,7 @@ export const authApi = {
   },
 
   async logout() {
-    try {
-      await http
-        .post("/api/auth/logout")
-        .then((res) => {
-          navigate("/");
-          localStorage.removeItem("mm_access_token");
-          localStorage.removeItem("mm_user");
-          localStorage.removeItem("mm_erp_role");
-        })
-        .catch((err) => {
-          console.log(err);
-        });
-    } catch {
-      console.log("error");
-    }
+    await http.post("/api/auth/logout");
   },
 
   async changePassword(currentPassword, newPassword) {

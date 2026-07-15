@@ -38,10 +38,27 @@ import StatusBadge from "@/components/bp/StatusBadge";
 import { SUBJECTS, INDIAN_STATES } from "@/lib/constants.js";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
-const ROLE_OPTIONS = [
-  { value: "teacher", label: "Teacher" },
-  // { value: "accounts_manager", label: "Accounts Manager" },
-];
+
+// Which roles each viewer can assign when adding/editing a staff member.
+// Admin Officer manages branch-level leadership (Principal, Accounts
+// Manager) across branches; Accounts Manager and Principal only manage
+// Teachers within their own single branch.
+const ROLE_OPTIONS_BY_VIEWER = {
+  admin_officer: [
+    { value: "principal", label: "Principal" },
+    { value: "accounts_manager", label: "Accounts Manager" },
+  ],
+  accounts_manager: [{ value: "teacher", label: "Teacher" }],
+  principal: [{ value: "teacher", label: "Teacher" }],
+};
+const DEFAULT_ROLE_OPTIONS = [{ value: "teacher", label: "Teacher" }];
+const ROLE_LABELS = {
+  teacher: "Teacher",
+  principal: "Principal",
+  accounts_manager: "Accounts Manager",
+  admin_officer: "Admin Officer",
+  super_admin: "Super Admin",
+};
 
 const PINCODE_RE = /^[1-9][0-9]{5}$/;
 const PHONE_RE = /^\d{10}$/;
@@ -63,6 +80,7 @@ const EMPTY_ADDRESS = {
 const EMPTY_FORM = {
   full_name: "",
   role: "teacher",
+  branch: "",
   email: "",
   password: "",
   subject_taught: [],
@@ -85,7 +103,16 @@ const formatSubjects = (val) =>
 
 export default function BPStaff() {
   const { user } = useAuth();
-  const isMultiBranch = user?.role === "admin_officer";
+  const viewerRole = user?.role;
+  const isMultiBranch = viewerRole === "admin_officer";
+  // Admin Officer creates branch-level leadership across any branch, so
+  // they must explicitly pick which branch a new Principal/Accounts
+  // Manager belongs to. Accounts Manager and Principal only ever add
+  // Teachers into their own branch, which the backend fills in
+  // automatically from their account - no picker needed for them.
+  const showBranchField = viewerRole === "admin_officer";
+  const baseRoleOptions =
+    ROLE_OPTIONS_BY_VIEWER[viewerRole] || DEFAULT_ROLE_OPTIONS;
   const [staff, setStaff] = useState([]);
   const [branches, setBranches] = useState([]);
   const [selectedBranch, setSelectedBranch] = useState("all");
@@ -145,6 +172,24 @@ export default function BPStaff() {
     [staff],
   );
 
+  // Options for the Add/Edit form's Role select - scoped to what this
+  // viewer is allowed to assign. If editing a record whose current role
+  // falls outside that set (e.g. an Admin Officer opening a legacy
+  // Teacher record), keep it selectable so the field doesn't render blank.
+  const formRoleOptions = useMemo(() => {
+    if (
+      editingId &&
+      form.role &&
+      !baseRoleOptions.some((r) => r.value === form.role)
+    ) {
+      return [
+        ...baseRoleOptions,
+        { value: form.role, label: ROLE_LABELS[form.role] || form.role },
+      ];
+    }
+    return baseRoleOptions;
+  }, [baseRoleOptions, editingId, form.role]);
+
   const visibleStaff = useMemo(() => {
     return staff
       .filter((s) => roleFilter === "all" || s.role === roleFilter)
@@ -190,6 +235,8 @@ export default function BPStaff() {
     setEditingId(null);
     setForm({
       ...EMPTY_FORM,
+      role: baseRoleOptions[0]?.value || "teacher",
+      branch: "",
       address: { ...EMPTY_ADDRESS },
       subject_taught: [],
     });
@@ -201,6 +248,7 @@ export default function BPStaff() {
     setForm({
       full_name: s.full_name || "",
       role: s.role || "teacher",
+      branch: s.branch || "",
       email: s.email || "",
       password: "", // left blank = unchanged
       // Defensive: normalize whatever shape comes back (array, legacy
@@ -240,6 +288,7 @@ export default function BPStaff() {
     form.role &&
     form.email &&
     (editingId || form.password) && // password required only when creating
+    (!showBranchField || form.branch) &&
     addressValid &&
     phoneValid;
 
@@ -262,6 +311,10 @@ export default function BPStaff() {
         address: addressGiven ? form.address : undefined,
       };
       if (form.password) payload.password = form.password;
+      // Only sent for Admin Officer, who has no single default branch of
+      // their own - Accounts Manager/Principal omit it entirely so the
+      // backend defaults to the creator's own branch.
+      if (showBranchField) payload.branch = form.branch;
 
       if (editingId) {
         await userApi.update(editingId, payload);
@@ -695,7 +748,7 @@ export default function BPStaff() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {ROLE_OPTIONS.map((r) => (
+                  {formRoleOptions.map((r) => (
                     <SelectItem key={r.value} value={r.value}>
                       {r.label}
                     </SelectItem>
@@ -703,6 +756,28 @@ export default function BPStaff() {
                 </SelectContent>
               </Select>
             </div>
+            {showBranchField && (
+              <div>
+                <label className="text-xs font-medium text-slate-600 mb-1 block">
+                  Branch *
+                </label>
+                <Select
+                  value={form.branch}
+                  onValueChange={(v) => setForm({ ...form, branch: v })}
+                >
+                  <SelectTrigger className="text-sm">
+                    <SelectValue placeholder="Select branch" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {branches.map((b) => (
+                      <SelectItem key={b._id} value={b._id}>
+                        {b.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div>
               <label className="text-xs font-medium text-slate-600 mb-1 block">
                 Email *

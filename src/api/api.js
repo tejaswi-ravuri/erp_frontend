@@ -224,6 +224,24 @@ export const branchApi = {
     const { data } = await http.get("/api/branches", { params });
     return data?.data ?? data;
   },
+
+  /** POST /api/branches — Admin Officer only */
+  async create(body) {
+    const { data } = await http.post("/api/branches", body);
+    return data?.data ?? data;
+  },
+
+  /** PUT /api/branches/:id — Admin Officer only */
+  async update(id, body) {
+    const { data } = await http.put(`/api/branches/${id}`, body);
+    return data?.data ?? data;
+  },
+
+  /** DELETE /api/branches/:id — Admin Officer only; soft-deletes (is_active: false) */
+  async remove(id) {
+    const { data } = await http.delete(`/api/branches/${id}`);
+    return data?.data ?? data;
+  },
 };
 export const analyticsApi = {
   async overview(params = {}) {
