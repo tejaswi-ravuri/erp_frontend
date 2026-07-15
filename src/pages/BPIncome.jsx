@@ -1,8 +1,15 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { incomeApi } from "@/api/api";
+import { incomeApi, branchApi, feeApi } from "@/api/api";
 import { useAuth } from "@/lib/AuthContext";
 import { toast } from "sonner";
-import { Plus, TrendingUp, Pencil, Trash2, AlertTriangle } from "lucide-react";
+import {
+  Plus,
+  TrendingUp,
+  Pencil,
+  Trash2,
+  AlertTriangle,
+  Building2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -205,6 +212,10 @@ const apiErrorMessage = (err) =>
 
 export default function BPIncome() {
   const { user } = useAuth();
+  // Admin Officer is the multi-branch role - it also drives the
+  // pending-deletion-approval banner below, and (per product decision)
+  // Income is view-only for this role: no Add Income button.
+  const isBranchAdminOfficer = user?.role === "admin_officer";
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -214,6 +225,24 @@ export default function BPIncome() {
   const [paymentMethodFilter, setPaymentMethodFilter] = useState("All");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [branches, setBranches] = useState([]);
+  const [selectedBranch, setSelectedBranch] = useState("all");
+  // Real fee-payment transactions for the same branch/date scope as the
+  // Income records below - drives the "Fee Payments" and "Total Income"
+  // figures near Category Breakdown, so "Total Income" actually means
+  // Fee Payments + other Income combined, not just the latter.
+  const [feePayments, setFeePayments] = useState([]);
+
+  // Admin officers pick which of their assigned branches to view (or all
+  // of them combined) - GET /api/branches already only returns branches
+  // they're actually assigned to.
+  useEffect(() => {
+    if (!isBranchAdminOfficer) return;
+    branchApi
+      .list()
+      .then((data) => setBranches(data || []))
+      .catch((err) => toast.error(apiErrorMessage(err)));
+  }, [isBranchAdminOfficer]);
 
   // Table pagination - server-driven, since filters narrow the match set.
   const [page, setPage] = useState(1);
@@ -248,6 +277,10 @@ export default function BPIncome() {
       paymentMethodFilter !== "All" ? paymentMethodFilter : undefined,
     from: dateFrom || undefined,
     to: dateTo || undefined,
+    branch:
+      isBranchAdminOfficer && selectedBranch !== "all"
+        ? selectedBranch
+        : undefined,
   };
 
   const load = () => {
@@ -263,12 +296,21 @@ export default function BPIncome() {
         page,
         limit: PAGE_SIZE,
       }),
+      // Same branch/date scope, no category (Income-only) or payment-method
+      // filter applied - feeds the "Fee Payments"/"Total Income" figures.
+      feeApi.listPayments({
+        branch: dateAndMethodParams.branch,
+        from: dateAndMethodParams.from,
+        to: dateAndMethodParams.to,
+        status: "Paid",
+      }),
     ])
-      .then(([summaryRes, pageRes]) => {
+      .then(([summaryRes, pageRes, feePaymentsRes]) => {
         setSummaryRecords(summaryRes.data);
         setRecords(pageRes.data);
         setTotalCount(pageRes.meta?.total ?? pageRes.data.length);
         setTotalPages(pageRes.meta?.totalPages ?? 1);
+        setFeePayments(feePaymentsRes?.data || feePaymentsRes || []);
       })
       .catch((err) => toast.error(apiErrorMessage(err)))
       .finally(() => setLoading(false));
@@ -277,7 +319,14 @@ export default function BPIncome() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, categoryFilter, paymentMethodFilter, dateFrom, dateTo]);
+  }, [
+    page,
+    categoryFilter,
+    paymentMethodFilter,
+    dateFrom,
+    dateTo,
+    selectedBranch,
+  ]);
 
   // Any filter change (other than paging itself) restarts at page 1.
   const applyCategoryFilter = (v) => {
@@ -296,18 +345,24 @@ export default function BPIncome() {
     setDateTo(v);
     setPage(1);
   };
+  const applyBranchFilter = (v) => {
+    setSelectedBranch(v);
+    setPage(1);
+  };
   const clearFilters = () => {
     setCategoryFilter("All");
     setPaymentMethodFilter("All");
     setDateFrom("");
     setDateTo("");
+    setSelectedBranch("all");
     setPage(1);
   };
   const filtersActive =
     categoryFilter !== "All" ||
     paymentMethodFilter !== "All" ||
     dateFrom ||
-    dateTo;
+    dateTo ||
+    selectedBranch !== "all";
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -399,7 +454,6 @@ export default function BPIncome() {
 
   // Admin Officers only approve/reject deletion requests for branches
   // assigned to them (User.branches) - mirrors the backend's isBranchAdminOfficer check.
-  const isBranchAdminOfficer = user?.role === "admin_officer";
   const myBranchIds = useMemo(
     () => (user?.branches || []).map((b) => String(b?._id || b)),
     [user],
@@ -437,6 +491,20 @@ export default function BPIncome() {
       .sort((a, b) => b.value - a.value);
   }, [summaryRecords]);
 
+  // "Total Income" = Fee Payments + other Income, for the current
+  // branch/date scope. Deliberately ignores the category filter (unlike
+  // `total` above) so this figure always reflects the full scope rather
+  // than one narrowed-down category.
+  const otherIncomeTotal = useMemo(
+    () => summaryRecords.reduce((sum, r) => sum + (r.amount || 0), 0),
+    [summaryRecords],
+  );
+  const feePaymentsTotal = useMemo(
+    () => feePayments.reduce((sum, f) => sum + (f.amount || 0), 0),
+    [feePayments],
+  );
+  const combinedIncomeTotal = otherIncomeTotal + feePaymentsTotal;
+
   return (
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between">
@@ -446,12 +514,14 @@ export default function BPIncome() {
             General school income - not tied to a specific student
           </p>
         </div>
-        <Button
-          onClick={() => setShowForm(true)}
-          className="bg-emerald-600 hover:bg-emerald-700 gap-1.5"
-        >
-          <Plus className="w-4 h-4" /> Add Income
-        </Button>
+        {!isBranchAdminOfficer && (
+          <Button
+            onClick={() => setShowForm(true)}
+            className="bg-emerald-600 hover:bg-emerald-700 gap-1.5"
+          >
+            <Plus className="w-4 h-4" /> Add Income
+          </Button>
+        )}
       </div>
 
       {isBranchAdminOfficer && pendingForMe.length > 0 && (
@@ -478,6 +548,10 @@ export default function BPIncome() {
                     {r.delete_requested_at
                       ? ` on ${new Date(r.delete_requested_at).toLocaleDateString("en-IN")}`
                       : ""}
+                    {" · "}
+                    <span className="font-medium text-slate-600">
+                      {r.branch?.name || "—"}
+                    </span>
                   </p>
                 </div>
                 <div className="flex gap-2 shrink-0">
@@ -505,6 +579,29 @@ export default function BPIncome() {
       )}
 
       <div className="flex flex-wrap items-end gap-3">
+        {isBranchAdminOfficer && (
+          <div>
+            <label className="text-xs font-medium text-slate-600 mb-1 block">
+              Branch
+            </label>
+            <div className="flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-indigo-500" />
+              <Select value={selectedBranch} onValueChange={applyBranchFilter}>
+                <SelectTrigger className="w-40 h-9 text-sm">
+                  <SelectValue placeholder="Branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {branches.map((b) => (
+                    <SelectItem key={b._id} value={b._id}>
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
         <div>
           <label className="text-xs font-medium text-slate-600 mb-1 block">
             Category
@@ -706,6 +803,33 @@ export default function BPIncome() {
           </div>
         </div>
       )}
+
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <p className="text-xs text-slate-500 font-medium mb-1">
+            Other Income
+          </p>
+          <p className="text-xl font-bold text-slate-700">
+            ₹{otherIncomeTotal.toLocaleString("en-IN")}
+          </p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <p className="text-xs text-slate-500 font-medium mb-1">
+            Fee Payments
+          </p>
+          <p className="text-xl font-bold text-slate-700">
+            ₹{feePaymentsTotal.toLocaleString("en-IN")}
+          </p>
+        </div>
+        <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-4 col-span-2 md:col-span-1">
+          <p className="text-xs text-emerald-700 font-medium mb-1">
+            Total Income
+          </p>
+          <p className="text-xl font-bold text-emerald-700">
+            ₹{combinedIncomeTotal.toLocaleString("en-IN")}
+          </p>
+        </div>
+      </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-4">
         <h3 className="text-sm font-semibold text-slate-700 mb-1">

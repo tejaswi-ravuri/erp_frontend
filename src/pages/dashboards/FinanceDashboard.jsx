@@ -157,10 +157,15 @@ export default function FinanceDashboard() {
       displayBranches = data.all_branches || [];
       displayTitle = `All Branches (${displayBranches.length})`;
     } else {
-      displayStats = data.combined_stats;
+      // FIX: this used to always fall back to data.combined_stats here,
+      // so the summary cards never actually reflected the selected
+      // branch - only the branch grid/chart below (which already used
+      // `selected` correctly) changed. The cards need that same
+      // per-branch stats object, not the all-branches combined one.
       const selected = data.all_branches?.find(
         (b) => String(b._id) === String(selectedBranch),
       );
+      displayStats = selected || data.combined_stats;
       displayBranches = selected ? [selected] : [];
       const branchName = allBranches.find(
         (b) => String(b._id) === String(selectedBranch),
@@ -248,7 +253,11 @@ export default function FinanceDashboard() {
                   ? "—"
                   : formatCurrencyShort(displayStats?.total_income || 0)
               }
-              sub={`₹${formatNumber(displayStats?.total_income || 0)}`}
+              sub={
+                loading
+                  ? undefined
+                  : `Fee Payments ${formatCurrencyShort(displayStats?.fee_collections || 0)} · Other ${formatCurrencyShort(displayStats?.other_income || 0)}`
+              }
               icon={TrendingUp}
               color="bg-emerald-600"
               onClick={() => navigate("/income")}

@@ -21,7 +21,16 @@
       "Bash(node --check src/routes/studentFeeReportRoutes.js)",
       "Bash(cd \"c:\\\\Users\\\\Tejaswi\\\\Desktop\\\\Tejaswi\\\\Freelance projects\\\\MastermindsFullcode\" && echo \"---entityClient---\" && find masterminds/src/api -iname \"*.js\" && echo \"---search entities. usage---\" && grep -rln \"entities\\\\.\" masterminds/src --include=*.jsx --include=*.js)",
       "Read(//c/Users/Tejaswi/Desktop/Tejaswi/Freelance projects/MastermindsFullcode/**)",
-      "Bash(npx vite *)"
+      "Bash(npx vite *)",
+      "Bash(node --check src/controllers/userController.js)",
+      "Bash(node -e \"import\\('./src/controllers/feeController.js'\\).then\\(\\(\\)=>console.log\\('feeController OK'\\)\\).catch\\(e=>{console.error\\(e\\); process.exit\\(1\\)}\\)\")",
+      "Bash(node -e \"import\\('./src/controllers/userController.js'\\).then\\(\\(\\)=>console.log\\('userController OK'\\)\\).catch\\(e=>{console.error\\(e\\); process.exit\\(1\\)}\\)\")",
+      "Bash(node -e \"import\\('./src/controllers/incomeController.js'\\).then\\(\\(\\)=>console.log\\('income OK'\\)\\).catch\\(e=>{console.error\\(e\\); process.exit\\(1\\)}\\)\")",
+      "Bash(node -e \"import\\('./src/controllers/expenditureController.js'\\).then\\(\\(\\)=>console.log\\('expenditure OK'\\)\\).catch\\(e=>{console.error\\(e\\); process.exit\\(1\\)}\\)\")",
+      "Bash(node -e \"import\\('./src/controllers/feeController.js'\\).then\\(\\(\\)=>console.log\\('OK'\\)\\).catch\\(e=>{console.error\\(e\\); process.exit\\(1\\)}\\)\")",
+      "Bash(node -e \"import\\('./src/controllers/analyticsController.js'\\).then\\(\\(\\)=>console.log\\('analyticsController OK'\\)\\).catch\\(e=>{console.error\\(e\\); process.exit\\(1\\)}\\)\")",
+      "Bash(node -e \"import\\('./src/rbac/permissions.js'\\).then\\(\\(\\)=>console.log\\('permissions OK'\\)\\).catch\\(e=>{console.error\\(e\\); process.exit\\(1\\)}\\)\")",
+      "Bash(node -e \"import\\('./src/controllers/analyticsController.js'\\).then\\(\\(\\)=>console.log\\('OK'\\)\\).catch\\(e=>{console.error\\(e\\); process.exit\\(1\\)}\\)\")"
     ]
   }
 }

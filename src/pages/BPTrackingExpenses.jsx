@@ -6,8 +6,10 @@ import {
   RefreshCw,
   ChevronDown,
   Download,
+  FileSpreadsheet,
   Building2,
 } from "lucide-react";
+import * as XLSX from "xlsx";
 import { exportTrackingExpenses } from "@/utils/pdfExport";
 import { Button } from "@/components/ui/button";
 import {
@@ -283,6 +285,67 @@ export default function BPTrackingExpenses() {
     });
   };
 
+  // Two-column Income/Expenditure ledger layout (S.No, label, amount on
+  // each side, with independent numbering) - matches the branch-office
+  // income & expenditure statement format used outside the app, e.g. for
+  // sharing with a branch's accountant. Student fee income and other
+  // income are combined into a single Income column here (unlike the PDF,
+  // which keeps them as two labeled sections) since that combined-column
+  // layout is what the target format looks like.
+  const handleExportExcel = () => {
+    const incomeRows = [...studentFeeIncome, ...otherIncome];
+    const expRows = expenditureBreakdown;
+    const maxLen = Math.max(incomeRows.length, expRows.length);
+
+    const branchTitle = branchLabel || "ALL BRANCHES";
+    const title = `INCOME AND EXPENDITURE OF ${branchTitle} FROM ${fromDate} TO ${toDate}`;
+
+    const aoa = [
+      [title],
+      ["S NO", "INCOME", "AMOUNT", "S NO", "EXPENDITURE", "AMOUNT"],
+    ];
+
+    for (let i = 0; i < maxLen; i++) {
+      const inc = incomeRows[i];
+      const exp = expRows[i];
+      aoa.push([
+        inc ? i + 1 : "",
+        inc ? inc.label : "",
+        inc ? inc.value : "",
+        exp ? i + 1 : "",
+        exp ? exp.label : "",
+        exp ? exp.value : "",
+      ]);
+    }
+
+    aoa.push(["", "TOTAL", totalIncome, "", "TOTAL", totalExpenditure]);
+    aoa.push([]);
+    aoa.push(["", "Total Income", "", "", "", totalIncome]);
+    aoa.push(["", "Total Expenditure", "", "", "", totalExpenditure]);
+    aoa.push([
+      "",
+      isProfit ? "Net Profit" : "Net Loss",
+      "",
+      "",
+      "",
+      isProfit ? closingBalance : -Math.abs(closingBalance),
+    ]);
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [
+      { wch: 6 },
+      { wch: 32 },
+      { wch: 14 },
+      { wch: 6 },
+      { wch: 32 },
+      { wch: 14 },
+    ];
+    ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Financial Report");
+    XLSX.writeFile(wb, `FinancialReport_${fromDate}_${toDate}.xlsx`);
+  };
+
   return (
     <div className="space-y-5 max-w-5xl mx-auto">
       {/* ── PAGE HEADER ── */}
@@ -296,14 +359,24 @@ export default function BPTrackingExpenses() {
             Expenditure records
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={handleExport}
-          disabled={loading}
-          className="gap-1.5 text-sm border-indigo-300 text-indigo-600 hover:bg-indigo-50"
-        >
-          <Download className="w-4 h-4" /> Print / Export PDF
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={handleExport}
+            disabled={loading}
+            className="gap-1.5 text-sm border-indigo-300 text-indigo-600 hover:bg-indigo-50"
+          >
+            <Download className="w-4 h-4" /> Print / Export PDF
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleExportExcel}
+            disabled={loading}
+            className="gap-1.5 text-sm border-emerald-300 text-emerald-600 hover:bg-emerald-50"
+          >
+            <FileSpreadsheet className="w-4 h-4" /> Export Excel
+          </Button>
+        </div>
       </div>
 
       {/* ── FILTERS ── */}

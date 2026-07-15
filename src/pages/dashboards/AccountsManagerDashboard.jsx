@@ -118,8 +118,9 @@ export default function AccountsManagerDashboard() {
             color: "bg-indigo-500",
           },
           {
-            label: "Fee Collected This Month",
-            value: fmt(overview?.fee_collected_this_month),
+            label: "Total Income (This Month)",
+            value: fmt(overview?.total_income_this_month),
+            sub: `Fee Payments ${fmt(overview?.fee_collected_this_month)} · Other ${fmt(overview?.other_income_this_month)}`,
             icon: DollarSign,
             color: "bg-emerald-500",
           },
@@ -135,7 +136,7 @@ export default function AccountsManagerDashboard() {
             icon: Users,
             color: "bg-violet-500",
           },
-        ].map(({ label, value, icon: Icon, color }) => (
+        ].map(({ label, value, sub, icon: Icon, color }) => (
           <div
             key={label}
             className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5"
@@ -147,6 +148,7 @@ export default function AccountsManagerDashboard() {
             </div>
             <p className="text-xl font-black text-slate-800">{value}</p>
             <p className="text-xs text-slate-500 mt-0.5">{label}</p>
+            {sub && <p className="text-[11px] text-slate-400 mt-1">{sub}</p>}
           </div>
         ))}
       </div>
