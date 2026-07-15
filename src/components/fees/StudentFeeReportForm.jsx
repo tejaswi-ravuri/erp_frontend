@@ -470,12 +470,16 @@ export default function StudentFeeReportForm({ record, onClose, onSaved }) {
                       <label className="text-xs font-medium text-slate-500">
                         Paid
                       </label>
-                      <NumberInput
-                        className="h-9 mt-1"
-                        disabled={feeFieldsDisabled}
-                        value={fields[bucket.paid]}
-                        onChange={(n) => setField(bucket.paid, n)}
-                      />
+                      {/* Read-only - paid_*_fee only ever moves through an
+                      actual collected payment (Fee Payments page), never
+                      hand-edited here, so it can't drift from the real
+                      payment history. */}
+                      <div className="h-9 mt-1 flex items-center px-3 rounded-md border border-slate-200 bg-slate-50 text-sm text-slate-600">
+                        ₹{Number(fields[bucket.paid] || 0).toLocaleString("en-IN")}
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Collected via Fee Payments - not editable here.
+                      </p>
                     </div>
                   </div>
                 )}

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { feeApi, classApi } from "@/api/api";
+import { feeApi, classApi, branchApi } from "@/api/api";
+import { useAuth } from "@/lib/AuthContext";
 import { toast } from "sonner";
 import {
   Plus,
@@ -9,6 +10,7 @@ import {
   Download,
   Search,
   ArrowUpDown,
+  Building2,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
@@ -127,8 +129,14 @@ function SummaryCard({ label, value, color = "indigo" }) {
 }
 
 export default function StudentFeeReportPage() {
+  const { user } = useAuth();
+  const isMultiBranch = user?.role === "admin_officer";
+  const canAddRecord = user?.role === "accounts_manager";
+
   const [records, setRecords] = useState([]);
   const [classes, setClasses] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [selectedBranch, setSelectedBranch] = useState("all");
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterClass, setFilterClass] = useState("all");
@@ -145,14 +153,27 @@ export default function StudentFeeReportPage() {
     [classes],
   );
 
+  // Admin officers pick which of their assigned branches to view (or all
+  // of them combined) - GET /api/branches already only returns branches
+  // they're actually assigned to.
+  useEffect(() => {
+    if (!isMultiBranch) return;
+    branchApi
+      .list()
+      .then((data) => setBranches(data || []))
+      .catch((err) => toast.error(apiErrorMessage(err)));
+  }, [isMultiBranch]);
+
   // `background: true` is used by the 10s poll below - it refreshes
   // `records` in place without touching `loading`, so a silent sync
   // never blanks the table out to a "Loading..." row. Only the very
   // first mount (background=false, the default) shows the spinner.
   const load = ({ background = false } = {}) => {
     if (!background) setLoading(true);
+    const branchParam =
+      isMultiBranch && selectedBranch !== "all" ? selectedBranch : undefined;
     feeApi
-      .listReports({ sort: "sno" })
+      .listReports({ sort: "sno", branch: branchParam })
       .then((data) => {
         setRecords(data);
       })
@@ -172,7 +193,7 @@ export default function StudentFeeReportPage() {
       .catch((err) => toast.error(apiErrorMessage(err)));
     const interval = setInterval(() => load({ background: true }), 10000); // Sync every 10 seconds
     return () => clearInterval(interval);
-  }, []);
+  }, [isMultiBranch, selectedBranch]);
 
   const handleInlineUpdate = async (id, field, value) => {
     try {
@@ -422,16 +443,18 @@ export default function StudentFeeReportPage() {
           >
             <Download className="w-3.5 h-3.5" /> Export
           </Button>
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditing(null);
-              setShowForm(true);
-            }}
-            className="bg-indigo-600 hover:bg-indigo-700 gap-1"
-          >
-            <Plus className="w-4 h-4" /> Add Student Record
-          </Button>
+          {canAddRecord && (
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditing(null);
+                setShowForm(true);
+              }}
+              className="bg-indigo-600 hover:bg-indigo-700 gap-1"
+            >
+              <Plus className="w-4 h-4" /> Add Student Record
+            </Button>
+          )}
         </div>
       </div>
 
@@ -468,6 +491,24 @@ export default function StudentFeeReportPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+        {isMultiBranch && (
+          <div className="flex items-center gap-2">
+            <Building2 className="w-4 h-4 text-indigo-500" />
+            <Select value={selectedBranch} onValueChange={setSelectedBranch}>
+              <SelectTrigger className="w-40 h-9">
+                <SelectValue placeholder="Branch" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((b) => (
+                  <SelectItem key={b._id} value={b._id}>
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <Select value={filterClass} onValueChange={setFilterClass}>
           <SelectTrigger className="w-32 h-9">
             <SelectValue placeholder="Class" />

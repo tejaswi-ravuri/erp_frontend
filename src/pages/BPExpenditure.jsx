@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { expenditureApi } from "@/api/api";
+import { expenditureApi, branchApi } from "@/api/api";
 import { useAuth } from "@/lib/AuthContext";
 import { toast } from "sonner";
 import {
@@ -8,6 +8,7 @@ import {
   Pencil,
   Trash2,
   AlertTriangle,
+  Building2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -257,6 +258,10 @@ const apiErrorMessage = (err) =>
 
 export default function BPExpenditure() {
   const { user } = useAuth();
+  // Admin Officer is the multi-branch role - it also drives the
+  // pending-deletion-approval banner below, and (per product decision)
+  // Expenditure is view-only for this role: no Add Expenditure / documents.
+  const isBranchAdminOfficer = user?.role === "admin_officer";
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -266,6 +271,19 @@ export default function BPExpenditure() {
   const [paymentModeFilter, setPaymentModeFilter] = useState("All");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [branches, setBranches] = useState([]);
+  const [selectedBranch, setSelectedBranch] = useState("all");
+
+  // Admin officers pick which of their assigned branches to view (or all
+  // of them combined) - GET /api/branches already only returns branches
+  // they're actually assigned to.
+  useEffect(() => {
+    if (!isBranchAdminOfficer) return;
+    branchApi
+      .list()
+      .then((data) => setBranches(data || []))
+      .catch((err) => toast.error(apiErrorMessage(err)));
+  }, [isBranchAdminOfficer]);
 
   // Table pagination - server-driven, since filters narrow the match set.
   const [page, setPage] = useState(1);
@@ -304,6 +322,10 @@ export default function BPExpenditure() {
     payment_mode: paymentModeFilter !== "All" ? paymentModeFilter : undefined,
     from: dateFrom || undefined,
     to: dateTo || undefined,
+    branch:
+      isBranchAdminOfficer && selectedBranch !== "all"
+        ? selectedBranch
+        : undefined,
   };
 
   const load = () => {
@@ -333,7 +355,14 @@ export default function BPExpenditure() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, categoryFilter, paymentModeFilter, dateFrom, dateTo]);
+  }, [
+    page,
+    categoryFilter,
+    paymentModeFilter,
+    dateFrom,
+    dateTo,
+    selectedBranch,
+  ]);
 
   // Any filter change (other than paging itself) restarts at page 1.
   const applyCategoryFilter = (v) => {
@@ -352,18 +381,24 @@ export default function BPExpenditure() {
     setDateTo(v);
     setPage(1);
   };
+  const applyBranchFilter = (v) => {
+    setSelectedBranch(v);
+    setPage(1);
+  };
   const clearFilters = () => {
     setCategoryFilter("All");
     setPaymentModeFilter("All");
     setDateFrom("");
     setDateTo("");
+    setSelectedBranch("all");
     setPage(1);
   };
   const filtersActive =
     categoryFilter !== "All" ||
     paymentModeFilter !== "All" ||
     dateFrom ||
-    dateTo;
+    dateTo ||
+    selectedBranch !== "all";
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -522,7 +557,6 @@ export default function BPExpenditure() {
 
   // Admin Officers only approve/reject deletion requests for branches
   // assigned to them (User.branches) - mirrors the backend's isBranchAdminOfficer check.
-  const isBranchAdminOfficer = user?.role === "admin_officer";
   const myBranchIds = useMemo(
     () => (user?.branches || []).map((b) => String(b?._id || b)),
     [user],
@@ -565,12 +599,14 @@ export default function BPExpenditure() {
           <h2 className="text-xl font-semibold text-slate-800">Expenditure</h2>
           <p className="text-sm text-slate-500">{totalCount} records</p>
         </div>
-        <Button
-          onClick={() => setShowForm(true)}
-          className="bg-red-600 hover:bg-red-700 gap-1.5"
-        >
-          <Plus className="w-4 h-4" /> Add Expenditure
-        </Button>
+        {!isBranchAdminOfficer && (
+          <Button
+            onClick={() => setShowForm(true)}
+            className="bg-red-600 hover:bg-red-700 gap-1.5"
+          >
+            <Plus className="w-4 h-4" /> Add Expenditure
+          </Button>
+        )}
       </div>
 
       {isBranchAdminOfficer && pendingForMe.length > 0 && (
@@ -598,6 +634,10 @@ export default function BPExpenditure() {
                     {r.delete_requested_at
                       ? ` on ${new Date(r.delete_requested_at).toLocaleDateString("en-IN")}`
                       : ""}
+                    {" · "}
+                    <span className="font-medium text-slate-600">
+                      {r.branch?.name || "—"}
+                    </span>
                   </p>
                 </div>
                 <div className="flex gap-2 shrink-0">
@@ -630,6 +670,32 @@ export default function BPExpenditure() {
         {/* Table */}
         <div className="space-y-4">
           <div className="flex flex-wrap items-end gap-3">
+            {isBranchAdminOfficer && (
+              <div>
+                <label className="text-xs font-medium text-slate-600 mb-1 block">
+                  Branch
+                </label>
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-indigo-500" />
+                  <Select
+                    value={selectedBranch}
+                    onValueChange={applyBranchFilter}
+                  >
+                    <SelectTrigger className="w-40 h-9 text-sm">
+                      <SelectValue placeholder="Branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Branches</SelectItem>
+                      {branches.map((b) => (
+                        <SelectItem key={b._id} value={b._id}>
+                          {b.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
             <div>
               <label className="text-xs font-medium text-slate-600 mb-1 block">
                 Category

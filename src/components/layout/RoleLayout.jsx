@@ -25,16 +25,20 @@ import {
   ChevronRight,
   BookCheck,
   BriefcaseIcon,
+  User,
 } from "lucide-react";
 
 const NAV_BY_ROLE = {
   finance: [
     { label: "Dashboard", icon: LayoutDashboard, path: "/" },
+    { label: "Fee Payments", icon: CreditCard, path: "/fees" },
     {
       label: "Student Fee Report",
       icon: FileText,
       path: "/student-fee-report",
     },
+    { label: "Staff", icon: User, path: "/staff" },
+    { label: "Income", icon: TrendingUp, path: "/income" },
     { label: "Expenditure", icon: TrendingDown, path: "/expenditure" },
     { label: "Financial Report", icon: BarChart2, path: "/financial-report" },
     { label: "Accounts", icon: Wallet, path: "/accounts" },
@@ -61,6 +65,7 @@ const NAV_BY_ROLE = {
   ],
   consultant: [
     { label: "Dashboard", icon: LayoutDashboard, path: "/" },
+    { label: "Staff", icon: User, path: "/staff" },
     { label: "Fee Payments", icon: CreditCard, path: "/fees" },
     { label: "Admissions", icon: UserPlus, path: "/admissions" },
     { label: "Students", icon: Users, path: "/students" },
@@ -348,10 +353,10 @@ export default function RoleLayout({ user }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button className="relative p-2 rounded-lg text-slate-500 hover:bg-slate-100">
+            {/* <button className="relative p-2 rounded-lg text-slate-500 hover:bg-slate-100">
               <Bell className="w-4 h-4" />
               <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
-            </button>
+            </button> */}
             <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
               <div
                 className={`w-7 h-7 rounded-full ${accent} flex items-center justify-center`}

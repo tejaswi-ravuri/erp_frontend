@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
-import { userApi } from "@/api/api";
+import React, { useState, useEffect, useMemo } from "react";
+import { userApi, branchApi } from "@/api/api";
 import { useAuth } from "@/lib/AuthContext";
+import { toast } from "sonner";
 import {
   Plus,
   User,
@@ -9,6 +10,8 @@ import {
   Pencil,
   Trash2,
   AlertTriangle,
+  Building2,
+  ArrowUpDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,7 +85,14 @@ const formatSubjects = (val) =>
 
 export default function BPStaff() {
   const { user } = useAuth();
+  const isMultiBranch = user?.role === "admin_officer";
   const [staff, setStaff] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [selectedBranch, setSelectedBranch] = useState("all");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("name");
+  const [sortDir, setSortDir] = useState("asc");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null); // null = "add" mode
   const [form, setForm] = useState(EMPTY_FORM);
@@ -103,25 +113,78 @@ export default function BPStaff() {
   // worth tightening to an explicit role allow-list if that's a real case.
   const canManageStaff = user?.role !== "teacher";
 
+  // Admin officers pick which of their assigned branches to view (or all
+  // of them combined) - GET /api/branches already only returns branches
+  // they're actually assigned to.
+  useEffect(() => {
+    if (!isMultiBranch) return;
+    branchApi
+      .list()
+      .then((data) => setBranches(data || []))
+      .catch(() => toast.error("Failed to load branches"));
+  }, [isMultiBranch]);
+
   const load = async () => {
     setLoading(true);
-    const data = await userApi.list({ exclude_role: "student" });
+    const branchParam =
+      isMultiBranch && selectedBranch !== "all" ? selectedBranch : undefined;
+    const data = await userApi.list({
+      exclude_role: "student",
+      branch: branchParam,
+    });
     setStaff(data);
     setLoading(false);
   };
 
   useEffect(() => {
     load();
-  }, []);
+  }, [isMultiBranch, selectedBranch]);
 
-  const totalPages = Math.max(1, Math.ceil(staff.length / pageSize));
+  const roleOptions = useMemo(
+    () => [...new Set(staff.map((s) => s.role).filter(Boolean))],
+    [staff],
+  );
+
+  const visibleStaff = useMemo(() => {
+    return staff
+      .filter((s) => roleFilter === "all" || s.role === roleFilter)
+      .filter((s) => {
+        if (statusFilter === "all") return true;
+        const active = s.is_active !== false;
+        return statusFilter === "Active" ? active : !active;
+      })
+      .sort((a, b) => {
+        let aVal, bVal;
+        if (sortBy === "salary") {
+          aVal = a.salary || 0;
+          bVal = b.salary || 0;
+        } else {
+          aVal = a.full_name || "";
+          bVal = b.full_name || "";
+        }
+        if (typeof aVal === "string")
+          return sortDir === "asc"
+            ? aVal.localeCompare(bVal)
+            : bVal.localeCompare(aVal);
+        return sortDir === "asc" ? aVal - bVal : bVal - aVal;
+      });
+  }, [staff, roleFilter, statusFilter, sortBy, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(visibleStaff.length / pageSize));
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [totalPages, page]);
 
-  const paginated = staff.slice((page - 1) * pageSize, page * pageSize);
-  const rangeStart = staff.length === 0 ? 0 : (page - 1) * pageSize + 1;
-  const rangeEnd = Math.min(page * pageSize, staff.length);
+  useEffect(() => {
+    setPage(1);
+  }, [roleFilter, statusFilter, selectedBranch]);
+
+  const paginated = visibleStaff.slice(
+    (page - 1) * pageSize,
+    page * pageSize,
+  );
+  const rangeStart = visibleStaff.length === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, visibleStaff.length);
 
   const openAddForm = () => {
     setEditingId(null);
@@ -235,7 +298,7 @@ export default function BPStaff() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold text-slate-800">Staff</h2>
-          <p className="text-sm text-slate-500">{staff.length} members</p>
+          <p className="text-sm text-slate-500">{visibleStaff.length} members</p>
         </div>
         <Button
           onClick={openAddForm}
@@ -243,6 +306,66 @@ export default function BPStaff() {
         >
           <Plus className="w-4 h-4" /> Add Staff
         </Button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {isMultiBranch && (
+          <div className="flex items-center gap-2">
+            <Building2 className="w-4 h-4 text-indigo-500" />
+            <Select value={selectedBranch} onValueChange={setSelectedBranch}>
+              <SelectTrigger className="w-40 h-9">
+                <SelectValue placeholder="Branch" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((b) => (
+                  <SelectItem key={b._id} value={b._id}>
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        <Select value={roleFilter} onValueChange={setRoleFilter}>
+          <SelectTrigger className="w-36 h-9">
+            <SelectValue placeholder="Role" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Roles</SelectItem>
+            {roleOptions.map((r) => (
+              <SelectItem key={r} value={r}>
+                {r}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-36 h-9">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="Active">Active</SelectItem>
+            <SelectItem value="Inactive">Inactive</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={sortBy} onValueChange={setSortBy}>
+          <SelectTrigger className="w-36 h-9">
+            <SelectValue placeholder="Sort By" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="name">Sort: Name</SelectItem>
+            <SelectItem value="salary">Sort: Salary</SelectItem>
+          </SelectContent>
+        </Select>
+        <button
+          onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+          className="h-9 px-3 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 flex items-center gap-1.5 text-sm"
+        >
+          <ArrowUpDown className="w-3.5 h-3.5" />
+          {sortDir === "asc" ? "A→Z" : "Z→A"}
+        </button>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -279,7 +402,7 @@ export default function BPStaff() {
                   </td>
                 </tr>
               )}
-              {!loading && staff.length === 0 && (
+              {!loading && visibleStaff.length === 0 && (
                 <tr>
                   <td
                     colSpan={canManageStaff ? 7 : 6}

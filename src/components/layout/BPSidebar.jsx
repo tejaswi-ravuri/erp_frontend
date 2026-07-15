@@ -28,7 +28,7 @@ const navItems = [
   { label: "Marks", icon: BookOpen, path: "/marks" },
   { label: "Report Cards", icon: GraduationCap, path: "/report-cards" },
   {
-    label: "Fee / Income",
+    label: "Fee",
     icon: CreditCard,
     children: [
       { label: "Fee Payments", path: "/fees" },
