@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Outlet, Link, useLocation } from "react-router-dom";
 import { useRole, ROLE_META } from "@/lib/RoleContext";
+import { useLogout } from "@/lib/useLogout";
 import {
   LayoutDashboard,
   Users,
@@ -26,9 +27,10 @@ import {
   BookCheck,
   BriefcaseIcon,
   User,
+  Building2,
 } from "lucide-react";
 
-const NAV_BY_ROLE = {
+export const NAV_BY_ROLE = {
   finance: [
     { label: "Dashboard", icon: LayoutDashboard, path: "/" },
     { label: "Fee Payments", icon: CreditCard, path: "/fees" },
@@ -42,6 +44,7 @@ const NAV_BY_ROLE = {
     { label: "Expenditure", icon: TrendingDown, path: "/expenditure" },
     { label: "Financial Report", icon: BarChart2, path: "/financial-report" },
     { label: "Accounts", icon: Wallet, path: "/accounts" },
+    { label: "Branches", icon: Building2, path: "/branches" },
   ],
   teacher: [
     { label: "Dashboard", icon: LayoutDashboard, path: "/" },
@@ -82,7 +85,7 @@ const NAV_BY_ROLE = {
 };
 
 // Sub-navigation items for each role under specific labels
-const SUB_NAV_BY_ROLE = {
+export const SUB_NAV_BY_ROLE = {
   consultant: [
     {
       label: "Enquiry",
@@ -131,7 +134,8 @@ const ACCENT = {
 };
 
 export default function RoleLayout({ user }) {
-  const { activeRole, logout } = useRole();
+  const { activeRole } = useRole();
+  const logout = useLogout();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState({});
   const location = useLocation();

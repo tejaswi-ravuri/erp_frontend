@@ -27,11 +27,13 @@ function hydrateUser() {
 
 // ── Slice ────────────────────────────────────────────────────────────────────
 
+const initialUser = hydrateUser();
+
 const authSlice = createSlice({
   name: "auth",
   initialState: {
-    user: null,
-    isAuthenticated: false,
+    user: initialUser,
+    isAuthenticated: Boolean(initialUser),
   },
   reducers: {
     setUser(state, action) {
