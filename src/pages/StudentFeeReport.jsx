@@ -411,12 +411,20 @@ export default function StudentFeeReportPage() {
   };
 
   const handlePrint = () => window.print();
+  const userDetails = localStorage.getItem("mm_user");
+  const userDetailsObj = userDetails ? JSON.parse(userDetails) : null;
 
   return (
     <div className="p-5">
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-5">
         <div className="flex items-center gap-3">
-          <img src="/logo.webp" alt="The Masterminds School" className="h-9 w-auto" />
+          {userDetailsObj?.schoolName === "Master Minds" && (
+            <img
+              src="/logo.webp"
+              alt="The Masterminds School"
+              className="h-9 w-auto"
+            />
+          )}
           <div>
             <h2 className="text-xl font-bold text-slate-800">
               Student Fee Report
@@ -629,16 +637,21 @@ export default function StudentFeeReportPage() {
                 </th>
                 {FEE_BUCKETS.map((b) => (
                   <React.Fragment key={b.key}>
-                    {["Gross", "Concession", "Net", "Paid", "Balance", "Status"].map(
-                      (h) => (
-                        <th
-                          key={`${b.key}-${h}`}
-                          className="text-right px-3 py-2 font-semibold text-slate-600 whitespace-nowrap border-r border-slate-200"
-                        >
-                          {h}
-                        </th>
-                      ),
-                    )}
+                    {[
+                      "Gross",
+                      "Concession",
+                      "Net",
+                      "Paid",
+                      "Balance",
+                      "Status",
+                    ].map((h) => (
+                      <th
+                        key={`${b.key}-${h}`}
+                        className="text-right px-3 py-2 font-semibold text-slate-600 whitespace-nowrap border-r border-slate-200"
+                      >
+                        {h}
+                      </th>
+                    ))}
                   </React.Fragment>
                 ))}
                 <th className="text-left px-3 py-2 font-semibold text-slate-600 border-r border-slate-200">
@@ -729,7 +742,9 @@ export default function StudentFeeReportPage() {
                             </td>
                             <td className="px-3 py-2 text-center border-r border-slate-100">
                               {has ? (
-                                <StatusBadge value={balance > 0 ? "Pending" : "Paid"} />
+                                <StatusBadge
+                                  value={balance > 0 ? "Pending" : "Paid"}
+                                />
                               ) : (
                                 <span className="text-slate-300">—</span>
                               )}
