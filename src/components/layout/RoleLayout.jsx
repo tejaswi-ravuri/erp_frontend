@@ -175,6 +175,8 @@ export default function RoleLayout({ user }) {
     if (subItems.length === 0) return false;
     return expandedMenus[label] || isSubItemActive(subItems);
   };
+  const userDetails = localStorage.getItem("mm_user");
+  const userDetailsObj = userDetails ? JSON.parse(userDetails) : null;
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
@@ -206,7 +208,9 @@ export default function RoleLayout({ user }) {
             </div>
             <div>
               <p className="text-sm font-bold text-white leading-tight">
-                MasterMinds ERP
+                {userDetailsObj?.schoolName === "Master Minds"
+                  ? "MasterMinds ERP"
+                  : "Krishnaveni ERP"}
               </p>
               <p className="text-[10px] text-slate-400 capitalize">
                 {meta.label}
@@ -348,7 +352,9 @@ export default function RoleLayout({ user }) {
               <span className="text-xl">{meta.icon}</span>
               <div>
                 <h1 className="text-sm font-semibold text-slate-800">
-                  MasterMinds ERP
+                  {userDetailsObj?.schoolName === "Master Minds"
+                    ? "MasterMinds ERP"
+                    : "Krishnaveni ERP"}
                 </h1>
                 <p className="text-xs text-slate-400 capitalize">
                   {meta.label}
