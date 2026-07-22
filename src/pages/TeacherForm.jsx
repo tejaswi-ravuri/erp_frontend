@@ -55,14 +55,14 @@ function validate(form) {
   return errors;
 }
 
-// This school runs LKG/UKG through Class 10 (see lib/constants.js) - four
-// groups, not the five you'd need if XI/XII existed.
+// This school runs Nursery/LKG/UKG through Class 10 (see lib/constants.js) -
+// four groups, not the five you'd need if XI/XII existed.
 function ClassCheckboxGrid({ selected, onChange }) {
   const groups = [
-    { label: "Pre-Primary", classes: CLASS_LIST.slice(0, 2) },
-    { label: "Primary (1–5)", classes: CLASS_LIST.slice(2, 7) },
-    { label: "Middle (6–8)", classes: CLASS_LIST.slice(7, 10) },
-    { label: "Secondary (9–10)", classes: CLASS_LIST.slice(10) },
+    { label: "Pre-Primary", classes: CLASS_LIST.slice(0, 3) },
+    { label: "Primary (1–5)", classes: CLASS_LIST.slice(3, 8) },
+    { label: "Middle (6–8)", classes: CLASS_LIST.slice(8, 11) },
+    { label: "Secondary (9–10)", classes: CLASS_LIST.slice(11) },
   ];
 
   const toggle = (cls) => {

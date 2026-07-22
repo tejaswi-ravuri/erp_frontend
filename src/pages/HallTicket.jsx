@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { entities } from "@/api/entityClient";
+import { classApi } from "@/api/api";
+import { useRole, ROLES } from "@/lib/RoleContext";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -54,8 +56,11 @@ const EMPTY_SUBJECT = {
 };
 
 export default function HallTicket() {
+  const { activeRole } = useRole();
+  const isTeacher = activeRole === ROLES.TEACHER;
   const [students, setStudents] = useState([]);
   const [examSchedules, setExamSchedules] = useState([]);
+  const [classes, setClasses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedClass, setSelectedClass] = useState("");
   const [selectedExam, setSelectedExam] = useState(null);
@@ -77,14 +82,22 @@ export default function HallTicket() {
     Promise.all([
       entities.Student.list("full_name", 500),
       entities.ExamSchedule.list("-created_date"),
-    ]).then(([s, e]) => {
+      classApi.list(),
+    ]).then(([s, e, classesRes]) => {
       setStudents(s);
       setExamSchedules(e);
+      setClasses(classesRes?.data || []);
       setLoading(false);
     });
   }, []);
 
-  const classStudents = students.filter((s) => s.class === selectedClass);
+  // Student.class is a reference to a Class document's _id, so the filter
+  // has to compare against that id rather than a display label.
+  const classLabel = (c) => (/^\d+$/.test(c.grade) ? `Class ${c.grade}` : c.grade);
+  const selectedClassObj = classes.find((c) => c._id === selectedClass);
+  const classStudents = students.filter(
+    (s) => String(s.class) === selectedClass,
+  );
 
   const addSubject = () =>
     setForm((f) => ({ ...f, subjects: [...f.subjects, { ...EMPTY_SUBJECT }] }));
@@ -189,7 +202,14 @@ export default function HallTicket() {
       col2x = 110;
     doc.text(`Name: ${student.full_name}`, col1x, y + 15);
     doc.text(`Admission No: ${student.admission_no || "—"}`, col2x, y + 15);
-    doc.text(`Class: ${student.class} ${student.section || ""}`, col1x, y + 22);
+    const studentClassObj = classes.find(
+      (c) => c._id === String(student.class),
+    );
+    doc.text(
+      `Class: ${studentClassObj ? classLabel(studentClassObj) : student.class} ${student.section || ""}`,
+      col1x,
+      y + 22,
+    );
     doc.text(`Father's Name: ${student.parent_name || "—"}`, col2x, y + 22);
     doc.text(`Center: ${exam.center || "Main Campus"}`, col1x, y + 29);
     doc.text(
@@ -313,7 +333,9 @@ export default function HallTicket() {
           </p>
         </div>
         <div className="flex gap-2">
-          {["generate", "create"].map((tab) => (
+          {/* "create" tab (exam schedule creation) is commented out for
+              teachers - only generating hall tickets is available to them. */}
+          {["generate", ...(isTeacher ? [] : ["create"])].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -340,9 +362,9 @@ export default function HallTicket() {
                   Exam Schedule
                 </label>
                 <Select
-                  value={selectedExam?.id || ""}
+                  value={selectedExam?._id || ""}
                   onValueChange={(v) =>
-                    setSelectedExam(examSchedules.find((e) => e.id === v))
+                    setSelectedExam(examSchedules.find((e) => e._id === v))
                   }
                 >
                   <SelectTrigger className="text-sm">
@@ -350,7 +372,7 @@ export default function HallTicket() {
                   </SelectTrigger>
                   <SelectContent>
                     {examSchedules.map((e) => (
-                      <SelectItem key={e.id} value={e.id}>
+                      <SelectItem key={e._id} value={e._id}>
                         {e.exam_name} — {e.class} ({e.exam_type})
                       </SelectItem>
                     ))}
@@ -366,9 +388,9 @@ export default function HallTicket() {
                     <SelectValue placeholder="Select class..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {CLASSES.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
+                    {classes.map((c) => (
+                      <SelectItem key={c._id} value={c._id}>
+                        {classLabel(c)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -399,7 +421,8 @@ export default function HallTicket() {
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
                 <p className="text-sm font-bold text-slate-700">
-                  {selectedClass} — {classStudents.length} Students
+                  {selectedClassObj ? classLabel(selectedClassObj) : ""} —{" "}
+                  {classStudents.length} Students
                 </p>
               </div>
               <div className="divide-y divide-slate-100">
@@ -410,12 +433,13 @@ export default function HallTicket() {
                 )}
                 {!loading && classStudents.length === 0 && (
                   <p className="text-center py-8 text-slate-400 text-sm">
-                    No students found in {selectedClass}
+                    No students found in{" "}
+                    {selectedClassObj ? classLabel(selectedClassObj) : "this class"}
                   </p>
                 )}
                 {classStudents.map((s) => (
                   <div
-                    key={s.id}
+                    key={s._id}
                     className="flex items-center justify-between px-5 py-3 hover:bg-slate-50"
                   >
                     <div>
@@ -456,7 +480,7 @@ export default function HallTicket() {
               <div className="divide-y divide-slate-100">
                 {examSchedules.map((e) => (
                   <div
-                    key={e.id}
+                    key={e._id}
                     className="px-5 py-3 flex items-center justify-between hover:bg-slate-50"
                   >
                     <div>
@@ -479,7 +503,7 @@ export default function HallTicket() {
         </div>
       )}
 
-      {activeTab === "create" && (
+      {activeTab === "create" && !isTeacher && (
         <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-5">
           <h3 className="text-sm font-bold text-slate-700">
             Create New Exam Schedule

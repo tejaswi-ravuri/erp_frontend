@@ -1,9 +1,50 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Plus, Edit, Trash2, X, UserPlus } from "lucide-react";
+import {
+  Plus,
+  Edit,
+  Trash2,
+  UserPlus,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  AlertTriangle,
+} from "lucide-react";
 import http from "../api/http";
 import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { Checkbox } from "../components/ui/checkbox";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { CLASS_LIST } from "@/lib/constants";
+
+// Same convention as HallTicket.jsx / BPAttendance.jsx elsewhere in the app -
+// plain numbers ("Class 5"), never roman numerals.
+const classLabel = (grade) => (/^\d+$/.test(grade) ? `Class ${grade}` : grade);
+const CLASS_OPTIONS = CLASS_LIST.map(classLabel);
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const academicYears = ["2026-2027", "2025-2026", "2024-2025"];
+const STATUS_FILTERS = ["Pending", "Converted"];
+
+const inputClass =
+  "w-full px-3 py-2 border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500";
+const labelClass = "block text-sm font-medium text-slate-700 mb-1";
+
+const apiErrorMessage = (err) =>
+  err?.response?.data?.message || err?.message || "Something went wrong";
 
 function ApplicationForm() {
   const STATES_28 = useMemo(
@@ -40,58 +81,58 @@ function ApplicationForm() {
     [],
   );
 
-  const classOptions = [
-    "NURSERY",
-    "L.K.G",
-    "U.K.G",
-    "I Class",
-    "II Class",
-    "III Class",
-    "IV Class",
-    "V Class",
-    "VI Class",
-    "VII Class",
-    "VIII Class",
-    "IX Class",
-    "X Class",
-  ];
-
   const [applications, setApplications] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [pagination, setPagination] = useState({
+    total: 0,
+    page: 1,
+    limit: 10,
+    pages: 1,
+  });
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const navigate = useNavigate();
 
+  // Filters - sent to the backend, not applied client-side.
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [filterClass, setFilterClass] = useState("all");
+  const [filterYear, setFilterYear] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const [confirmDeleteApplication, setConfirmDeleteApplication] =
+    useState(null);
+  const [deleting, setDeleting] = useState(false);
+
   const defaultAcademicYear = "2026-2027";
 
   const initialFormData = {
-    // Student Details
     studentName: "",
     fatherName: "",
     className: "",
     academicYear: defaultAcademicYear,
     mobileNo: "",
 
-    // Application Number (auto, disabled)
     applicationNo: "",
 
-    // Communication Address
     commAddressLine1: "",
     commLandmark: "",
     commCity: "",
     commDistrict: "",
     commState: "",
 
-    // Permanent Address
     permenantAddressLine1: "",
     permenantLandmark: "",
     permenantCity: "",
     permenantDistrict: "",
     permenantState: "",
 
-    // Permanent = Communication
     isPermanentSameAsCommunication: false,
 
-    // Payment Details
     proName: "",
     selectMV: "",
     mvNo: "",
@@ -109,10 +150,6 @@ function ApplicationForm() {
   const validateMobile = (value) => /^\d{10}$/.test(String(value || ""));
 
   const generateApplicationNo = (startYear, seq) => {
-    // MM{year}000{lengthof number of applications of that year}
-    // Example asked: MM20260001
-    // That implies: MM + year + 00 + seq(2 digits or more). We'll follow example:
-    // MM{year}000{seq padded to 2 digits}
     const seqStr = String(seq).padStart(2, "0");
     return `MM${startYear}000${seqStr}`;
   };
@@ -125,9 +162,38 @@ function ApplicationForm() {
     return generateApplicationNo(yearStart, nextSeq);
   };
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 400);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, filterClass, filterYear, filterStatus, dateFrom, dateTo]);
+
   const fetchApplications = async () => {
-    const { data } = await http.get("/api/admissions/applications");
-    setApplications(data?.data ?? []);
+    try {
+      setLoading(true);
+      const params = { page, limit: pageSize };
+      if (debouncedSearch) params.search = debouncedSearch;
+      if (filterClass !== "all") params.className = filterClass;
+      if (filterYear !== "all") params.academicYear = filterYear;
+      if (filterStatus !== "all") params.status = filterStatus;
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+
+      const { data } = await http.get("/api/admissions/applications", {
+        params,
+      });
+      setApplications(data?.data ?? []);
+      setPagination(
+        data?.pagination || { total: 0, page: 1, limit: pageSize, pages: 1 },
+      );
+    } catch (error) {
+      toast.error(apiErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const fetchApplicationById = async (id) => {
@@ -136,11 +202,9 @@ function ApplicationForm() {
   };
 
   useEffect(() => {
-    fetchApplications().catch((e) =>
-      console.error("fetchApplications error", e),
-    );
+    fetchApplications();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [page, pageSize, debouncedSearch, filterClass, filterYear, filterStatus, dateFrom, dateTo]);
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -149,6 +213,9 @@ function ApplicationForm() {
       [name]: type === "checkbox" ? checked : value,
     }));
   };
+
+  const setField = (field, value) =>
+    setFormData((prev) => ({ ...prev, [field]: value }));
 
   const handlePermanentSameToggle = (checked) => {
     setFormData((prev) => {
@@ -192,11 +259,9 @@ function ApplicationForm() {
     setFormData({
       ...initialFormData,
       ...app,
-      // backend fields: keep these as-is (student_name etc if backend uses snake_case)
-      // try mapping if needed
       studentName: app.studentName ?? app.student_name ?? "",
       fatherName: app.fatherName ?? app.father_name ?? "",
-      className: app.className ?? app.class_name ?? app.className ?? "",
+      className: app.className ?? app.class_name ?? "",
       mobileNo: app.mobileNo ?? app.mobile_no ?? app.mobile ?? "",
 
       commAddressLine1:
@@ -210,11 +275,7 @@ function ApplicationForm() {
       commDistrict: app.commDistrict ?? app.district ?? "",
       commState: app.commState ?? app.state ?? "",
 
-      permenantAddressLine1:
-        app.permenantAddressLine1 ??
-        app.permenantAddressLine1 ??
-        app.permanentAddressLine1 ??
-        "",
+      permenantAddressLine1: app.permenantAddressLine1 ?? "",
       permenantLandmark: app.permenantLandmark ?? "",
       permenantCity: app.permenantCity ?? "",
       permenantDistrict: app.permenantDistrict ?? "",
@@ -246,28 +307,30 @@ function ApplicationForm() {
     e.preventDefault();
 
     if (!formData.studentName || !formData.fatherName || !formData.className) {
-      alert(
+      toast.error(
         "Please fill all required fields (Student Name, Father Name, Class).",
       );
       return;
     }
 
     if (!validateMobile(formData.mobileNo)) {
-      alert("Mobile No must be exactly 10 digits.");
+      toast.error("Mobile No must be exactly 10 digits.");
       return;
     }
 
-    // Guard permanent fields: if checkbox checked, they should be synced and disabled.
-    // If unchecked, backend expects permanent fields; keep as empty if user didn't fill.
-
-    if (!editingId) {
-      await http.post("/api/admissions/addApplication", formData);
-    } else {
-      await http.put(`/api/admissions/application/${editingId}`, formData);
+    try {
+      if (!editingId) {
+        await http.post("/api/admissions/addApplication", formData);
+        toast.success("Application added successfully!");
+      } else {
+        await http.put(`/api/admissions/application/${editingId}`, formData);
+        toast.success("Application updated successfully!");
+      }
+      await fetchApplications();
+      closeModal();
+    } catch (error) {
+      toast.error(apiErrorMessage(error));
     }
-
-    await fetchApplications();
-    closeModal();
   };
 
   const handleConvertToAdmission = async (application) => {
@@ -304,562 +367,205 @@ function ApplicationForm() {
     });
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this application?"))
-      return;
-    await http.delete(`/api/admissions/application/${id}`);
-    await fetchApplications();
+  const handleDelete = async () => {
+    if (!confirmDeleteApplication) return;
+    setDeleting(true);
+    try {
+      await http.delete(
+        `/api/admissions/application/${confirmDeleteApplication._id}`,
+      );
+      toast.success("Application deleted successfully!");
+      setConfirmDeleteApplication(null);
+      await fetchApplications();
+    } catch (error) {
+      toast.error(apiErrorMessage(error));
+    } finally {
+      setDeleting(false);
+    }
   };
 
+  const rangeStart = pagination.total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, pagination.total);
+  const totalPages = pagination.pages || 1;
+
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Student Applications</h1>
-        <button
+    <div className="space-y-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold text-slate-800">
+            Sale of Application
+          </h2>
+          <p className="text-sm text-slate-500">
+            {pagination.total} total applications
+          </p>
+        </div>
+        <Button
           onClick={openAddModal}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm gap-1.5"
         >
-          <Plus size={20} />
-          Add Application
-        </button>
+          <Plus className="w-4 h-4" /> Add Application
+        </Button>
       </div>
 
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div
-            className="fixed inset-0 bg-black/20 backdrop-blur-sm transition-all duration-300"
-            onClick={closeModal}
-          ></div>
-
-          <div className="flex min-h-full items-center justify-center p-4">
-            <div className="relative bg-white/95 backdrop-blur-sm rounded-lg shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-y-auto border border-white/20">
-              <div className="sticky top-0 bg-white/95 backdrop-blur-sm border-b border-gray-200/50 px-6 py-4 rounded-t-lg z-10">
-                <div className="flex justify-between items-center">
-                  <h2 className="text-xl font-semibold text-gray-900">
-                    {editingId ? "Edit Application" : "New Application"}
-                  </h2>
-                  <button
-                    onClick={closeModal}
-                    className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
-                  >
-                    <X size={24} className="text-gray-500" />
-                  </button>
-                </div>
-              </div>
-
-              <form onSubmit={handleSubmit} className="px-6 py-4">
-                <fieldset className="border border-gray-200 rounded-lg px-4 py-4 mb-5">
-                  <legend className="px-2 text-sm font-semibold text-gray-700">
-                    Student Details
-                  </legend>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Student Name <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="studentName"
-                        value={formData.studentName}
-                        onChange={handleInputChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80"
-                        placeholder="Enter Student Name"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Father Name <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="fatherName"
-                        value={formData.fatherName}
-                        onChange={handleInputChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80"
-                        placeholder="Enter Father Name"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Class <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        name="className"
-                        value={formData.className}
-                        onChange={handleInputChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80"
-                        required
-                      >
-                        <option value="">--Select--</option>
-                        {classOptions.map((cls) => (
-                          <option key={cls} value={cls}>
-                            {cls}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Academic Year
-                      </label>
-                      <input
-                        type="text"
-                        name="academicYear"
-                        value={formData.academicYear}
-                        readOnly
-                        onChange={handleInputChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/80"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Mobile No <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="tel"
-                        name="mobileNo"
-                        value={formData.mobileNo}
-                        onChange={handleInputChange}
-                        inputMode="numeric"
-                        maxLength={10}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80"
-                        placeholder="Enter 10-digit Mobile No"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Application No
-                      </label>
-                      <input
-                        type="text"
-                        name="applicationNo"
-                        value={formData.applicationNo}
-                        disabled
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-600"
-                      />
-                    </div>
-                  </div>
-                </fieldset>
-
-                <fieldset className="border border-gray-200 rounded-lg px-4 py-4 mb-5">
-                  <legend className="px-2 text-sm font-semibold text-gray-700">
-                    Communication Address
-                  </legend>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Address Line 1 <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="commAddressLine1"
-                        value={formData.commAddressLine1}
-                        onChange={handleInputChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80"
-                        placeholder="Enter Communication Address"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Landmark <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="commLandmark"
-                        value={formData.commLandmark}
-                        onChange={handleInputChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80"
-                        placeholder="Enter Landmark"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        City <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="commCity"
-                        value={formData.commCity}
-                        onChange={handleInputChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80"
-                        placeholder="Enter City"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        District <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="commDistrict"
-                        value={formData.commDistrict}
-                        onChange={handleInputChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80"
-                        placeholder="Enter District"
-                        required
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        State <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        name="commState"
-                        value={formData.commState}
-                        onChange={handleInputChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80"
-                        required
-                      >
-                        <option value="">--Select State--</option>
-                        {STATES_28.map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                </fieldset>
-
-                <fieldset className="border border-gray-200 rounded-lg px-4 py-4 mb-5">
-                  <legend className="px-2 text-sm font-semibold text-gray-700">
-                    Permanent Address
-                  </legend>
-
-                  <div className="mb-4 flex items-center gap-3">
-                    <input
-                      id="permSame"
-                      type="checkbox"
-                      name="isPermanentSameAsCommunication"
-                      checked={formData.isPermanentSameAsCommunication}
-                      onChange={(e) =>
-                        handlePermanentSameToggle(e.target.checked)
-                      }
-                      className="h-4 w-4"
-                    />
-                    <label htmlFor="permSame" className="text-sm text-gray-700">
-                      Permanent Address is same as Communication Address
-                    </label>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Address Line 1 <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="permenantAddressLine1"
-                        value={formData.permenantAddressLine1}
-                        onChange={handleInputChange}
-                        disabled={formData.isPermanentSameAsCommunication}
-                        required
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                        placeholder="Enter Permanent Address"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Landmark <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="permenantLandmark"
-                        value={formData.permenantLandmark}
-                        onChange={handleInputChange}
-                        disabled={formData.isPermanentSameAsCommunication}
-                        required
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                        placeholder="Enter Landmark"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        City <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="permenantCity"
-                        value={formData.permenantCity}
-                        onChange={handleInputChange}
-                        disabled={formData.isPermanentSameAsCommunication}
-                        required
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                        placeholder="Enter City"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        District <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="permenantDistrict"
-                        value={formData.permenantDistrict}
-                        onChange={handleInputChange}
-                        disabled={formData.isPermanentSameAsCommunication}
-                        required
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                        placeholder="Enter District"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        State <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        name="permenantState"
-                        value={formData.permenantState}
-                        onChange={handleInputChange}
-                        disabled={formData.isPermanentSameAsCommunication}
-                        required
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                      >
-                        <option value="">--Select State--</option>
-                        {STATES_28.map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                </fieldset>
-
-                <fieldset className="border border-gray-200 rounded-lg px-4 py-4 mb-5">
-                  <legend className="px-2 text-sm font-semibold text-gray-700">
-                    Payment Details
-                  </legend>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Pro Name <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        name="proName"
-                        value={formData.proName}
-                        onChange={handleInputChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80"
-                        required
-                      >
-                        <option value="">Select a ProName</option>
-                        <option value="Pro 1">Pro 1</option>
-                        <option value="Pro 2">Pro 2</option>
-                        <option value="Pro 3">Pro 3</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Select MV/CV No <span className="text-red-500">*</span>
-                      </label>
-                      <div className="flex gap-4">
-                        <label className="flex items-center">
-                          <input
-                            type="radio"
-                            name="selectMV"
-                            value="MvNo"
-                            checked={formData.selectMV === "MvNo"}
-                            onChange={handleInputChange}
-                            required
-                            className="mr-2"
-                          />
-                          MvNo
-                        </label>
-                        <label className="flex items-center">
-                          <input
-                            type="radio"
-                            name="selectMV"
-                            value="CV No"
-                            checked={formData.selectMV === "CV No"}
-                            onChange={handleInputChange}
-                            required
-                            className="mr-2"
-                          />
-                          CV No
-                        </label>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Mv No <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="mvNo"
-                        value={formData.mvNo}
-                        onChange={handleInputChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80"
-                        placeholder="Enter Mv/CV No."
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Bank <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="bank"
-                        value={formData.bank}
-                        onChange={handleInputChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80"
-                        placeholder="Enter Bank Name"
-                        required
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Previous School <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="previousSchool"
-                        value={formData.previousSchool}
-                        onChange={handleInputChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white/80"
-                        placeholder="Enter Previous School Name"
-                        required
-                      />
-                    </div>
-                  </div>
-                </fieldset>
-
-                <div className="mt-6 flex justify-end gap-3 border-t border-gray-200/50 pt-4">
-                  <button
-                    type="button"
-                    onClick={closeModal}
-                    className="px-4 py-2 bg-gray-200/80 text-gray-800 rounded-lg hover:bg-gray-300/80 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    {editingId ? "Update Application" : "Submit Application"}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
+      <div className="flex flex-col sm:flex-row flex-wrap gap-3">
+        <div className="relative flex-1 min-w-50">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <Input
+            placeholder="Search by name, app no, or mobile..."
+            className="pl-9"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
-      )}
+        <Select value={filterClass} onValueChange={setFilterClass}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="All Classes" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Classes</SelectItem>
+            {CLASS_OPTIONS.map((c) => (
+              <SelectItem key={c} value={c}>
+                {c}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="All Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            {STATUS_FILTERS.map((s) => (
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={filterYear} onValueChange={setFilterYear}>
+          <SelectTrigger className="w-36">
+            <SelectValue placeholder="All Years" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Years</SelectItem>
+            {academicYears.map((y) => (
+              <SelectItem key={y} value={y}>
+                {y}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Input
+          type="date"
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+          className="w-36"
+          title="From date"
+        />
+        <Input
+          type="date"
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+          className="w-36"
+          title="To date"
+        />
+      </div>
 
-      <div className="bg-white shadow-md rounded-lg overflow-hidden border border-gray-200">
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
-                  Application No
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
-                  Student Name
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
-                  Father Name
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
-                  Class
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
-                  Academic Year
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
-                  Mobile No
-                </th>
-                <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
-                  Actions
-                </th>
+                {[
+                  "Application No",
+                  "Student Name",
+                  "Father Name",
+                  "Class",
+                  "Academic Year",
+                  "Mobile No",
+                  "Status",
+                  "",
+                ].map((h) => (
+                  <th
+                    key={h}
+                    className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide"
+                  >
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
-            <tbody>
-              {applications.length === 0 ? (
+            <tbody className="divide-y divide-slate-100">
+              {loading ? (
                 <tr>
-                  <td
-                    colSpan="7"
-                    className="px-4 py-8 text-center text-gray-500"
-                  >
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                    Loading...
+                  </td>
+                </tr>
+              ) : applications.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
                     No applications found. Click "Add Application" to create
                     one.
                   </td>
                 </tr>
               ) : (
                 applications.map((app) => (
-                  <tr
-                    key={app._id || app.id}
-                    className="border-b border-gray-200 hover:bg-gray-50 transition-colors"
-                  >
-                    <td className="px-4 py-3 text-sm text-gray-700">
+                  <tr key={app._id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium text-indigo-600">
                       {app.applicationNo || "N/A"}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
+                    <td className="px-4 py-3 font-medium text-slate-800">
                       {app.studentName || app.student_name}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
+                    <td className="px-4 py-3 text-slate-600">
                       {app.fatherName || app.father_name}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
+                    <td className="px-4 py-3 text-slate-600">
                       {app.className || app.class_name}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
+                    <td className="px-4 py-3 text-slate-600">
                       {app.academicYear}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
+                    <td className="px-4 py-3 text-slate-600">
                       {app.mobileNo || app.mobile}
                     </td>
-                    <td className="px-4 py-3 text-center">
-                      <div className="flex justify-center gap-2">
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                          app.isAdmitted
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-amber-100 text-amber-700"
+                        }`}
+                      >
+                        {app.isAdmitted ? "Converted" : "Pending"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
                         {!app.isAdmitted && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-green-600 border-green-200 hover:bg-green-50 hover:text-green-700"
-                            title="Convert to Admission"
+                          <button
                             onClick={() => handleConvertToAdmission(app)}
+                            className="p-1.5 rounded hover:bg-emerald-50 text-emerald-500"
+                            aria-label="Convert to Admission"
                           >
-                            <UserPlus className="w-3 h-3" />
-                          </Button>
+                            <UserPlus className="w-3.5 h-3.5" />
+                          </button>
                         )}
                         <button
-                          onClick={() => openEditModal(app._id || app.id)}
-                          className="p-1 text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                          title="Edit"
+                          onClick={() => openEditModal(app._id)}
+                          className="p-1.5 rounded hover:bg-indigo-50 text-indigo-500"
+                          aria-label="Edit application"
                         >
-                          <Edit size={18} />
+                          <Edit className="w-3.5 h-3.5" />
                         </button>
                         <button
-                          onClick={() => handleDelete(app._id || app.id)}
-                          className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
-                          title="Delete"
+                          onClick={() => setConfirmDeleteApplication(app)}
+                          className="p-1.5 rounded hover:bg-red-50 text-red-400"
+                          aria-label="Delete application"
                         >
-                          <Trash2 size={18} />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </td>
@@ -869,7 +575,522 @@ function ApplicationForm() {
             </tbody>
           </table>
         </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-t border-slate-100">
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span>
+              {pagination.total === 0
+                ? "0 results"
+                : `Showing ${rangeStart}–${rangeEnd} of ${pagination.total}`}
+            </span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(v) => {
+                setPageSize(Number(v));
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-28 h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((n) => (
+                  <SelectItem key={n} value={String(n)}>
+                    {n} / page
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              Previous
+            </Button>
+            <span className="text-xs text-slate-500 px-1">
+              Page {page} of {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next
+              <ChevronRight className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </div>
       </div>
+
+      {/* Add/Edit Application Dialog */}
+      <Dialog open={isModalOpen} onOpenChange={(open) => !open && closeModal()}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {editingId ? "Edit Application" : "New Application"}
+            </DialogTitle>
+          </DialogHeader>
+
+          <form onSubmit={handleSubmit} className="space-y-5 mt-2">
+            <fieldset className="border border-slate-200 rounded-lg px-4 py-4">
+              <legend className="px-2 text-sm font-semibold text-slate-700">
+                Student Details
+              </legend>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className={labelClass}>
+                    Student Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="studentName"
+                    value={formData.studentName}
+                    onChange={handleInputChange}
+                    className={inputClass}
+                    placeholder="Enter Student Name"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className={labelClass}>
+                    Father Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="fatherName"
+                    value={formData.fatherName}
+                    onChange={handleInputChange}
+                    className={inputClass}
+                    placeholder="Enter Father Name"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className={labelClass}>
+                    Class <span className="text-red-500">*</span>
+                  </label>
+                  <Select
+                    value={formData.className}
+                    onValueChange={(v) => setField("className", v)}
+                  >
+                    <SelectTrigger className="text-sm w-full">
+                      <SelectValue placeholder="Select Class" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CLASS_OPTIONS.map((cls) => (
+                        <SelectItem key={cls} value={cls}>
+                          {cls}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className={labelClass}>Academic Year</label>
+                  <input
+                    type="text"
+                    name="academicYear"
+                    value={formData.academicYear}
+                    readOnly
+                    className={`${inputClass} bg-slate-50`}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelClass}>
+                    Mobile No <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    name="mobileNo"
+                    value={formData.mobileNo}
+                    onChange={handleInputChange}
+                    inputMode="numeric"
+                    maxLength={10}
+                    className={inputClass}
+                    placeholder="Enter 10-digit Mobile No"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className={labelClass}>Application No</label>
+                  <input
+                    type="text"
+                    name="applicationNo"
+                    value={formData.applicationNo}
+                    disabled
+                    className={`${inputClass} bg-slate-100 text-slate-500`}
+                  />
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset className="border border-slate-200 rounded-lg px-4 py-4">
+              <legend className="px-2 text-sm font-semibold text-slate-700">
+                Communication Address
+              </legend>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className={labelClass}>
+                    Address Line 1 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="commAddressLine1"
+                    value={formData.commAddressLine1}
+                    onChange={handleInputChange}
+                    className={inputClass}
+                    placeholder="Enter Communication Address"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className={labelClass}>
+                    Landmark <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="commLandmark"
+                    value={formData.commLandmark}
+                    onChange={handleInputChange}
+                    className={inputClass}
+                    placeholder="Enter Landmark"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className={labelClass}>
+                    City <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="commCity"
+                    value={formData.commCity}
+                    onChange={handleInputChange}
+                    className={inputClass}
+                    placeholder="Enter City"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className={labelClass}>
+                    District <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="commDistrict"
+                    value={formData.commDistrict}
+                    onChange={handleInputChange}
+                    className={inputClass}
+                    placeholder="Enter District"
+                    required
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className={labelClass}>
+                    State <span className="text-red-500">*</span>
+                  </label>
+                  <Select
+                    value={formData.commState}
+                    onValueChange={(v) => setField("commState", v)}
+                  >
+                    <SelectTrigger className="text-sm w-full">
+                      <SelectValue placeholder="Select State" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STATES_28.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset className="border border-slate-200 rounded-lg px-4 py-4">
+              <legend className="px-2 text-sm font-semibold text-slate-700">
+                Permanent Address
+              </legend>
+
+              <div className="mb-4 flex items-center gap-2">
+                <Checkbox
+                  id="permSame"
+                  checked={formData.isPermanentSameAsCommunication}
+                  onCheckedChange={(checked) =>
+                    handlePermanentSameToggle(Boolean(checked))
+                  }
+                />
+                <label htmlFor="permSame" className="text-sm text-slate-700">
+                  Permanent Address is same as Communication Address
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className={labelClass}>
+                    Address Line 1 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="permenantAddressLine1"
+                    value={formData.permenantAddressLine1}
+                    onChange={handleInputChange}
+                    disabled={formData.isPermanentSameAsCommunication}
+                    required
+                    className={`${inputClass} disabled:bg-slate-100 disabled:cursor-not-allowed`}
+                    placeholder="Enter Permanent Address"
+                  />
+                </div>
+
+                <div>
+                  <label className={labelClass}>
+                    Landmark <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="permenantLandmark"
+                    value={formData.permenantLandmark}
+                    onChange={handleInputChange}
+                    disabled={formData.isPermanentSameAsCommunication}
+                    required
+                    className={`${inputClass} disabled:bg-slate-100 disabled:cursor-not-allowed`}
+                    placeholder="Enter Landmark"
+                  />
+                </div>
+
+                <div>
+                  <label className={labelClass}>
+                    City <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="permenantCity"
+                    value={formData.permenantCity}
+                    onChange={handleInputChange}
+                    disabled={formData.isPermanentSameAsCommunication}
+                    required
+                    className={`${inputClass} disabled:bg-slate-100 disabled:cursor-not-allowed`}
+                    placeholder="Enter City"
+                  />
+                </div>
+
+                <div>
+                  <label className={labelClass}>
+                    District <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="permenantDistrict"
+                    value={formData.permenantDistrict}
+                    onChange={handleInputChange}
+                    disabled={formData.isPermanentSameAsCommunication}
+                    required
+                    className={`${inputClass} disabled:bg-slate-100 disabled:cursor-not-allowed`}
+                    placeholder="Enter District"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className={labelClass}>
+                    State <span className="text-red-500">*</span>
+                  </label>
+                  <Select
+                    value={formData.permenantState}
+                    onValueChange={(v) => setField("permenantState", v)}
+                    disabled={formData.isPermanentSameAsCommunication}
+                  >
+                    <SelectTrigger className="text-sm w-full">
+                      <SelectValue placeholder="Select State" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STATES_28.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset className="border border-slate-200 rounded-lg px-4 py-4">
+              <legend className="px-2 text-sm font-semibold text-slate-700">
+                Payment Details
+              </legend>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className={labelClass}>
+                    Pro Name <span className="text-red-500">*</span>
+                  </label>
+                  <Select
+                    value={formData.proName}
+                    onValueChange={(v) => setField("proName", v)}
+                  >
+                    <SelectTrigger className="text-sm w-full">
+                      <SelectValue placeholder="Select a Pro Name" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Pro 1">Pro 1</SelectItem>
+                      <SelectItem value="Pro 2">Pro 2</SelectItem>
+                      <SelectItem value="Pro 3">Pro 3</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className={labelClass}>
+                    Select MV/CV No <span className="text-red-500">*</span>
+                  </label>
+                  <div className="flex gap-4 mt-2">
+                    <label className="flex items-center text-sm text-slate-700">
+                      <input
+                        type="radio"
+                        name="selectMV"
+                        value="MvNo"
+                        checked={formData.selectMV === "MvNo"}
+                        onChange={handleInputChange}
+                        required
+                        className="mr-2"
+                      />
+                      MvNo
+                    </label>
+                    <label className="flex items-center text-sm text-slate-700">
+                      <input
+                        type="radio"
+                        name="selectMV"
+                        value="CV No"
+                        checked={formData.selectMV === "CV No"}
+                        onChange={handleInputChange}
+                        required
+                        className="mr-2"
+                      />
+                      CV No
+                    </label>
+                  </div>
+                </div>
+
+                <div>
+                  <label className={labelClass}>
+                    Mv No <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="mvNo"
+                    value={formData.mvNo}
+                    onChange={handleInputChange}
+                    className={inputClass}
+                    placeholder="Enter Mv/CV No."
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className={labelClass}>
+                    Bank <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="bank"
+                    value={formData.bank}
+                    onChange={handleInputChange}
+                    className={inputClass}
+                    placeholder="Enter Bank Name"
+                    required
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className={labelClass}>
+                    Previous School <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="previousSchool"
+                    value={formData.previousSchool}
+                    onChange={handleInputChange}
+                    className={inputClass}
+                    placeholder="Enter Previous School Name"
+                    required
+                  />
+                </div>
+              </div>
+            </fieldset>
+
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={closeModal}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white"
+              >
+                {editingId ? "Update Application" : "Submit Application"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation */}
+      <Dialog
+        open={!!confirmDeleteApplication}
+        onOpenChange={() => setConfirmDeleteApplication(null)}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="w-5 h-5" />
+              Delete this application?
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600 mt-1">
+            <span className="font-medium text-slate-800">
+              {confirmDeleteApplication?.studentName}
+            </span>
+            &apos;s application ({confirmDeleteApplication?.applicationNo})
+            will be permanently removed.
+          </p>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setConfirmDeleteApplication(null)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

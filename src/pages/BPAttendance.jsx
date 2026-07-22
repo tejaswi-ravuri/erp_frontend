@@ -11,6 +11,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 const FALLBACK_SUBJECTS = [
   "Maths",
   "Science",
@@ -175,6 +181,36 @@ export default function BPAttendance() {
 
   const setStatus = (id, status) =>
     setAttendance((prev) => ({ ...prev, [id]: status }));
+
+  // What's already persisted for this class/subject/date, keyed by
+  // student_id - used to warn before silently overwriting a saved value.
+  const savedMap = useMemo(
+    () => Object.fromEntries(existing.map((a) => [a.student_id, a.status])),
+    [existing],
+  );
+
+  const [pendingChange, setPendingChange] = useState(null);
+
+  const requestStatusChange = (student, status) => {
+    const current = attendance[student._id] || "Present";
+    if (current === status) return;
+    const saved = savedMap[student._id];
+    if (saved && saved !== status) {
+      setPendingChange({
+        studentId: student._id,
+        studentName: student.full_name,
+        from: saved,
+        to: status,
+      });
+      return;
+    }
+    setStatus(student._id, status);
+  };
+
+  const confirmPendingChange = () => {
+    if (pendingChange) setStatus(pendingChange.studentId, pendingChange.to);
+    setPendingChange(null);
+  };
 
   const saveAttendance = async () => {
     if (!activeClassId || !activeSubject) return;
@@ -434,7 +470,7 @@ export default function BPAttendance() {
                               (opt) => (
                                 <button
                                   key={opt}
-                                  onClick={() => setStatus(s._id, opt)}
+                                  onClick={() => requestStatusChange(s, opt)}
                                   className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${
                                     status === opt
                                       ? opt === "Present"
@@ -538,6 +574,35 @@ export default function BPAttendance() {
           </div>
         </>
       )}
+
+      <Dialog
+        open={!!pendingChange}
+        onOpenChange={(open) => !open && setPendingChange(null)}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Change saved attendance?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600">
+            {pendingChange?.studentName}&apos;s attendance for{" "}
+            {fmtDate(date)} is already saved as{" "}
+            <span className="font-semibold">{pendingChange?.from}</span>.
+            Change it to{" "}
+            <span className="font-semibold">{pendingChange?.to}</span>?
+          </p>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setPendingChange(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmPendingChange}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              Yes, change it
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

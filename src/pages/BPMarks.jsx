@@ -63,6 +63,7 @@ export default function BPMarks() {
   const { user } = useAuth();
   const role = user?.role;
   const isTeacher = role === "teacher";
+  const isPrincipal = role === "principal";
   const myId = user?.id || user?._id;
 
   const [classes, setClasses] = useState([]);
@@ -226,12 +227,14 @@ export default function BPMarks() {
               : "Academic performance records"}
           </p>
         </div>
-        <Button
-          onClick={() => setShowForm(true)}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm gap-1.5"
-        >
-          <Plus className="w-4 h-4" /> Add Marks
-        </Button>
+        {!isPrincipal && (
+          <Button
+            onClick={() => setShowForm(true)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm gap-1.5"
+          >
+            <Plus className="w-4 h-4" /> Add Marks
+          </Button>
+        )}
       </div>
 
       <div className="flex gap-3">
