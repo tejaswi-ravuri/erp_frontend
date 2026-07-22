@@ -45,6 +45,7 @@ const EMPTY_FORM = {
   phone: "",
   is_active: true,
   address: { ...EMPTY_ADDRESS },
+  schoolName: "",
 };
 
 const apiErrorMessage = (err) =>
@@ -94,6 +95,7 @@ export default function BPBranches() {
       phone: b.phone || "",
       is_active: b.is_active !== false,
       address: { ...EMPTY_ADDRESS, ...(b.address || {}) },
+      schoolName: b.schoolName || "",
     });
     setShowForm(true);
   };
@@ -117,6 +119,7 @@ export default function BPBranches() {
         phone: form.phone || undefined,
         is_active: form.is_active,
         address: form.address,
+        schoolName: form.schoolName,
       };
       if (editingId) {
         await branchApi.update(editingId, payload);
@@ -229,16 +232,18 @@ export default function BPBranches() {
                   </td>
                 </tr>
               )}
-              {!loading && branches.length > 0 && filteredBranches.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="px-4 py-8 text-center text-slate-400"
-                  >
-                    No branches match "{search}".
-                  </td>
-                </tr>
-              )}
+              {!loading &&
+                branches.length > 0 &&
+                filteredBranches.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-4 py-8 text-center text-slate-400"
+                    >
+                      No branches match "{search}".
+                    </td>
+                  </tr>
+                )}
               {!loading &&
                 filteredBranches.map((b) => (
                   <tr key={b._id} className="hover:bg-slate-50">
@@ -296,9 +301,35 @@ export default function BPBranches() {
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editingId ? "Edit Branch" : "Add Branch"}</DialogTitle>
+            <DialogTitle>
+              {editingId ? "Edit Branch" : "Add Branch"}
+            </DialogTitle>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-3 mt-2">
+            <div>
+              <label className="text-xs font-medium text-slate-600 mb-1 block">
+                School Name *
+              </label>
+              <Select
+                value={form.schoolName || ""}
+                onValueChange={(schoolName) =>
+                  setForm({
+                    ...form,
+                    schoolName: schoolName,
+                  })
+                }
+              >
+                <SelectTrigger className="text-sm  w-full">
+                  <SelectValue placeholder="Select school Name" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Master Minds">Master Minds</SelectItem>
+                  <SelectItem value="Krishnaveni Talent School">
+                    Krishnaveni Talent School
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div>
               <label className="text-xs font-medium text-slate-600 mb-1 block">
                 Branch Name *
@@ -517,8 +548,8 @@ export default function BPBranches() {
             <span className="font-medium text-slate-800">
               {confirmDeleteBranch?.name}
             </span>{" "}
-            will be deactivated. Branches with active staff still assigned
-            can't be deleted.
+            will be deactivated. Branches with active staff still assigned can't
+            be deleted.
           </p>
           <div className="flex justify-end gap-2 mt-4">
             <Button
