@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 
 const GRADES = [
+  "NURSERY",
   "LKG",
   "UKG",
   "1",
