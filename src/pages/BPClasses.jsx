@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { authApi } from "../api/authApi";
 import { classApi } from "@/api/api";
-import { ROLES } from "@/lib/RoleContext";
+import { ROLES, useRole } from "@/lib/RoleContext";
+import { SUBJECTS } from "@/lib/constants";
 import { toast } from "sonner";
-import { Plus, Trash2, GraduationCap, Users } from "lucide-react";
+import { Plus, Trash2, GraduationCap, Users, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -38,11 +39,19 @@ const GRADES = [
 
 const ACADEMIC_YEAR_RE = /^\d{4}-\d{4}$/;
 
-function defaultAcademicYear() {
+// School year runs June-May, so before June the "current" academic year
+// still started last calendar year.
+function currentAcademicYearStart() {
   const now = new Date();
-  const y = now.getFullYear();
-  return now.getMonth() >= 5 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
+  return now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1;
 }
+
+function defaultAcademicYear() {
+  const y = currentAcademicYearStart();
+  return `${y}-${y + 1}`;
+}
+
+const ACADEMIC_YEARS = ["2025-2026", "2026-2027"];
 
 // capacity is optional on the schema (default null) - kept as an empty
 // string here so the Input can stay blank/uncontrolled-looking; it's
@@ -60,6 +69,8 @@ const apiErrorMessage = (err) =>
   "Something went wrong";
 
 export default function BPClasses() {
+  const { activeRole } = useRole();
+  const isPrincipal = activeRole === ROLES.PRINCIPAL;
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -67,6 +78,7 @@ export default function BPClasses() {
   const [classForm, setClassForm] = useState(EMPTY_CLASS_FORM);
   const [teacherDialogClass, setTeacherDialogClass] = useState(null);
   const [assignForm, setAssignForm] = useState({ teacher_id: "", subject: "" });
+  const [confirmDeleteClass, setConfirmDeleteClass] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -135,6 +147,7 @@ export default function BPClasses() {
     try {
       await classApi.remove(id);
       toast.success("Class deleted");
+      setConfirmDeleteClass(null);
       load();
     } catch (err) {
       toast.error(apiErrorMessage(err));
@@ -193,12 +206,14 @@ export default function BPClasses() {
             Set up classes, assign a Class Teacher, and assign subject teachers
           </p>
         </div>
-        <Button
-          onClick={() => setShowAddClass(true)}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm gap-1.5"
-        >
-          <Plus className="w-4 h-4" /> Add Class
-        </Button>
+        {isPrincipal && (
+          <Button
+            onClick={() => setShowAddClass(true)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm gap-1.5"
+          >
+            <Plus className="w-4 h-4" /> Add Class
+          </Button>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -253,26 +268,29 @@ export default function BPClasses() {
                       {c.academic_year}
                     </td>
                     <td className="px-4 py-3">
-                      {teachers.find((t) => t._id === c.class_teacher_id)
-                        ?.full_name || "Not assigned"}
-                      {/* <Select
-                        value={c.class_teacher_id || "none"}
-                        onValueChange={(v) =>
-                          setClassTeacher(c._id, v === "none" ? null : v)
-                        }
-                      >
-                        <SelectTrigger className="w-48 text-xs">
-                          <SelectValue placeholder="Not assigned" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Not assigned</SelectItem>
-                          {teachers.map((t) => (
-                            <SelectItem key={t._id} value={t._id}>
-                              {t.full_name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select> */}
+                      {isPrincipal ? (
+                        <Select
+                          value={c.class_teacher_id || "none"}
+                          onValueChange={(v) =>
+                            setClassTeacher(c._id, v === "none" ? null : v)
+                          }
+                        >
+                          <SelectTrigger className="w-48 text-xs">
+                            <SelectValue placeholder="Not assigned" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Not assigned</SelectItem>
+                            {teachers.map((t) => (
+                              <SelectItem key={t._id} value={t._id}>
+                                {t.full_name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        teachers.find((t) => t._id === c.class_teacher_id)
+                          ?.full_name || "Not assigned"
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <button
@@ -289,7 +307,7 @@ export default function BPClasses() {
                     </td>
                     <td className="px-4 py-3">
                       <button
-                        onClick={() => deleteClass(c._id)}
+                        onClick={() => setConfirmDeleteClass(c)}
                         className="text-slate-400 hover:text-red-600"
                         aria-label="Delete class"
                       >
@@ -333,14 +351,23 @@ export default function BPClasses() {
               <label className="text-xs font-medium text-slate-600 mb-1 block">
                 Academic Year *
               </label>
-              <Input
-                placeholder="e.g. 2025-2026"
+              <Select
                 value={classForm.academic_year}
-                onChange={(e) =>
-                  setClassForm({ ...classForm, academic_year: e.target.value })
+                onValueChange={(v) =>
+                  setClassForm({ ...classForm, academic_year: v })
                 }
-                className="text-sm"
-              />
+              >
+                <SelectTrigger className="text-sm">
+                  <SelectValue placeholder="Select academic year" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ACADEMIC_YEARS.map((y) => (
+                    <SelectItem key={y} value={y}>
+                      {y}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="col-span-2">
               <label className="text-xs font-medium text-slate-600 mb-1 block">
@@ -453,14 +480,23 @@ export default function BPClasses() {
                   <label className="text-xs font-medium text-slate-600 mb-1 block">
                     Subject
                   </label>
-                  <Input
-                    placeholder="e.g. Mathematics"
+                  <Select
                     value={assignForm.subject}
-                    onChange={(e) =>
-                      setAssignForm({ ...assignForm, subject: e.target.value })
+                    onValueChange={(v) =>
+                      setAssignForm({ ...assignForm, subject: v })
                     }
-                    className="text-sm"
-                  />
+                  >
+                    <SelectTrigger className="text-sm">
+                      <SelectValue placeholder="Select subject" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SUBJECTS.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <Button
                   onClick={addSubjectTeacher}
@@ -472,6 +508,43 @@ export default function BPClasses() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!confirmDeleteClass}
+        onOpenChange={() => setConfirmDeleteClass(null)}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="w-5 h-5" />
+              Delete this class?
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600 mt-1">
+            <span className="font-medium text-slate-800">
+              Class {confirmDeleteClass?.grade} (
+              {confirmDeleteClass?.academic_year})
+            </span>{" "}
+            will be removed from the list. You can bring it back later by
+            re-adding the same class - it just won't remember its old Class
+            Teacher or subject teachers.
+          </p>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setConfirmDeleteClass(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => deleteClass(confirmDeleteClass._id)}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              Delete
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

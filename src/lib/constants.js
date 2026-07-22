@@ -18,6 +18,7 @@ export const SUBJECTS = [
 ];
 
 export const CLASS_LIST = [
+  "NURSERY",
   "LKG",
   "UKG",
   "1",

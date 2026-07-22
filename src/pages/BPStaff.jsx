@@ -104,6 +104,7 @@ const formatSubjects = (val) =>
 export default function BPStaff() {
   const { user } = useAuth();
   const viewerRole = user?.role;
+  const isPrincipal = viewerRole === "principal";
   const isMultiBranch = viewerRole === "admin_officer";
   // Admin Officer creates branch-level leadership across any branch, so
   // they must explicitly pick which branch a new Principal/Accounts
@@ -139,6 +140,11 @@ export default function BPStaff() {
   // see these buttons even though the backend would reject the write -
   // worth tightening to an explicit role allow-list if that's a real case.
   const canManageStaff = user?.role !== "teacher";
+  // A Principal can see Accounts Managers on this page but only ever
+  // edit/deactivate Teacher records - the backend enforces this too
+  // (userController.js), this just keeps the buttons from appearing.
+  const canManageRow = (s) =>
+    canManageStaff && (!isPrincipal || s.role === "teacher");
 
   // Admin officers pick which of their assigned branches to view (or all
   // of them combined) - GET /api/branches already only returns branches
@@ -380,19 +386,21 @@ export default function BPStaff() {
             </Select>
           </div>
         )}
-        <Select value={roleFilter} onValueChange={setRoleFilter}>
-          <SelectTrigger className="w-36 h-9">
-            <SelectValue placeholder="Role" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Roles</SelectItem>
-            {roleOptions.map((r) => (
-              <SelectItem key={r} value={r}>
-                {r}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {!isPrincipal && (
+          <Select value={roleFilter} onValueChange={setRoleFilter}>
+            <SelectTrigger className="w-36 h-9">
+              <SelectValue placeholder="Role" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Roles</SelectItem>
+              {roleOptions.map((r) => (
+                <SelectItem key={r} value={r}>
+                  {r}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-36 h-9">
             <SelectValue placeholder="Status" />
@@ -499,28 +507,32 @@ export default function BPStaff() {
                     </td>
                     {canManageStaff && (
                       <td className="px-4 py-3">
-                        <div className="flex gap-1">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation(); // don't also open the detail dialog
-                              openEditForm(s);
-                            }}
-                            className="p-1.5 rounded hover:bg-indigo-50 text-indigo-500"
-                            aria-label="Edit"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setConfirmDeleteStaff(s);
-                            }}
-                            className="p-1.5 rounded hover:bg-red-50 text-red-400"
-                            aria-label="Deactivate"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        {canManageRow(s) ? (
+                          <div className="flex gap-1">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation(); // don't also open the detail dialog
+                                openEditForm(s);
+                              }}
+                              className="p-1.5 rounded hover:bg-indigo-50 text-indigo-500"
+                              aria-label="Edit"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDeleteStaff(s);
+                              }}
+                              className="p-1.5 rounded hover:bg-red-50 text-red-400"
+                              aria-label="Deactivate"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
                       </td>
                     )}
                   </tr>
@@ -612,7 +624,7 @@ export default function BPStaff() {
                     </div>
                   </div>
                 </div>
-                {canManageStaff && (
+                {canManageRow(selected) && (
                   <div className="flex gap-1">
                     <button
                       onClick={() => openEditForm(selected)}
